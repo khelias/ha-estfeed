@@ -28,6 +28,7 @@ from .const import (
     MIN_BACKFILL_MONTHS,
 )
 from .coordinator import EstfeedCoordinator
+from .nps import EleringNpsClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass=hass, client=client, slug=slug, options={**entry.data, **entry.options}
     )
     coordinator.meters = meters
+    coordinator.attach_nps_client(EleringNpsClient(session))
     coordinator.attach_store(Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.baselines"))
     await coordinator.async_load_baselines()
 

@@ -1063,3 +1063,62 @@ def test_update_cache_folds_expiring_intervals_into_frozen_sum(hass):
     assert baseline.frozen_sum == 4.0
     # Cumulative = frozen 4 + cached 1 = 5
     assert coordinator.cumulative_since_reset(eic, Kind.CONSUMPTION) == 5.0
+
+
+# ---- Task 6 tests: cost_streams_for, _build_tariff, last_nps_error ----
+
+from custom_components.estfeed.const import (
+    CONF_MARGIN_EUR_PER_KWH,
+    CONF_VAT_PERCENT,
+)
+from custom_components.estfeed.statistics import CostStream
+
+
+def _gas_meter() -> MeteringPoint:
+    return MeteringPoint(
+        eic="38ZEE-00720099-G",
+        commodity_type=CommodityType.NATURAL_GAS,
+        periods=[Period(start=datetime(2020, 1, 1, tzinfo=UTC), end=None)],
+    )
+
+
+def test_cost_streams_for_electricity_returns_two_streams(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    coord.meters = [_make_meter()]
+    streams = coord.cost_streams_for(_make_meter())
+    assert len(streams) == 2
+    ids = {s.statistic_id for s in streams}
+    assert ids == {"estfeed:home_cost_089n", "estfeed:home_compensation_089n"}
+    assert all(isinstance(s, CostStream) for s in streams)
+    # hass.config.currency defaults to EUR in HA test fixtures
+    assert all(s.unit in {"EUR", hass.config.currency} for s in streams)
+
+
+def test_cost_streams_for_gas_returns_empty(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    coord.meters = [_gas_meter()]
+    assert coord.cost_streams_for(_gas_meter()) == []
+
+
+def test_build_tariff_applies_configured_vat_and_margin(hass):
+    coord = EstfeedCoordinator(
+        hass=hass,
+        client=MagicMock(),
+        slug="home",
+        options={CONF_VAT_PERCENT: 22.0, CONF_MARGIN_EUR_PER_KWH: 0.01},
+    )
+    tariff = coord._build_tariff()
+    # 0.05 * 1.22 + 0.01 = 0.071
+    assert tariff(0.05) == pytest.approx(0.071)
+
+
+def test_build_tariff_uses_defaults_when_options_missing(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    tariff = coord._build_tariff()
+    # Default VAT=22.0, margin=0.0 -> 0.05 * 1.22 = 0.061
+    assert tariff(0.05) == pytest.approx(0.061)
+
+
+def test_last_nps_error_starts_none(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    assert coord.last_nps_error is None

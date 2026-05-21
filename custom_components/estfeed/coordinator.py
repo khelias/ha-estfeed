@@ -22,7 +22,11 @@ from .api import (
 )
 from .const import (
     CONF_BACKFILL_MONTHS,
+    CONF_MARGIN_EUR_PER_KWH,
     CONF_RESOLUTION,
+    CONF_VAT_PERCENT,
+    DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_DAYS_PER_REQUEST,
     ROLLING_CACHE_DAYS,
@@ -30,8 +34,12 @@ from .const import (
     Kind,
     Resolution,
 )
+from .nps import EleringNpsClient, NpsError
+from .pricing import make_tariff
 from .statistics import (
+    CostStream,
     StatisticStream,
+    async_write_cost_statistics,
     async_write_meter_statistics,
     build_statistic_id,
     eic_suffix,
@@ -118,6 +126,17 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         self.baselines: dict[tuple[str, Kind], CumulativeBaseline] = {}
         self._store: Store[dict[str, Any]] | None = None
         self._baselines_dirty = False
+        # NPS price client + last-fetch-error for diagnostics. Injected by
+        # __init__.py during setup_entry (real session). Tests can leave this
+        # as the default lazy client; production wiring overrides it via
+        # ``attach_nps_client`` before any fetch happens.
+        self._nps: EleringNpsClient | None = None
+        self.last_nps_error: str | None = None
+
+    def attach_nps_client(self, nps: EleringNpsClient) -> None:
+        """Inject the NPS price client. Called from setup_entry (production)
+        or directly in tests with a mocked client."""
+        self._nps = nps
 
     def attach_store(self, store: Store[dict[str, Any]]) -> None:
         """Attach the HA storage helper used to persist cumulative baselines.
@@ -139,6 +158,33 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
     def recent_requests(self) -> deque[dict[str, Any]]:
         """Expose the underlying client's recent-request ring buffer for diagnostics."""
         return self._client.recent_requests
+
+    def cost_streams_for(self, meter: MeteringPoint) -> list[CostStream]:
+        """Cost + compensation streams for one meter; empty list for gas."""
+        if meter.commodity_type.value != "ELECTRICITY":
+            return []
+        suffix = eic_suffix(meter.eic)
+        currency = self.hass.config.currency or "EUR"
+        return [
+            CostStream(
+                statistic_id=f"{DOMAIN}:{self.slug}_cost_{suffix}",
+                name=f"{self.slug} cost ({meter.eic})",
+                unit=currency,
+                kind=Kind.CONSUMPTION,
+            ),
+            CostStream(
+                statistic_id=f"{DOMAIN}:{self.slug}_compensation_{suffix}",
+                name=f"{self.slug} compensation ({meter.eic})",
+                unit=currency,
+                kind=Kind.PRODUCTION,
+            ),
+        ]
+
+    def _build_tariff(self):
+        """Construct the curried tariff function from current options."""
+        vat = float(self.options.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT))
+        margin = float(self.options.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH))
+        return make_tariff(vat, margin)
 
     def streams_for(self, meter: MeteringPoint) -> list[StatisticStream]:
         suffix = eic_suffix(meter.eic)
