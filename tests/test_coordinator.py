@@ -1122,3 +1122,179 @@ def test_build_tariff_uses_defaults_when_options_missing(hass):
 def test_last_nps_error_starts_none(hass):
     coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
     assert coord.last_nps_error is None
+
+
+# ---- Task 7 tests: cost branch + cost_only param ----
+
+
+def _hour_interval(hour: int, consumption: float) -> AccountingInterval:
+    return AccountingInterval(
+        period_start=datetime(2026, 5, 21, hour, tzinfo=UTC),
+        consumption_kwh=consumption,
+        production_kwh=0.0,
+        consumption_m3=None,
+        production_m3=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_meter_window_writes_cost_and_compensation_for_electricity(hass):
+    client = MagicMock()
+    client.get_metering_data = AsyncMock(
+        return_value=[
+            MeterData(
+                eic="38ZEE-00720089-N",
+                intervals=[_hour_interval(10, 2.0), _hour_interval(11, 3.0)],
+                error=None,
+            )
+        ]
+    )
+    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
+    coord.meters = [_make_meter()]
+    # Stub NPS so we can predict cost.
+    mock_nps = MagicMock()
+    mock_nps.async_get_prices = AsyncMock(
+        return_value={
+            datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05,
+            datetime(2026, 5, 21, 11, tzinfo=UTC): 0.05,
+        }
+    )
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_meter_statistics",
+        new=AsyncMock(return_value=5.0),
+    ) as mock_energy, patch(
+        "custom_components.estfeed.coordinator.async_write_cost_statistics",
+        new=AsyncMock(return_value=0.305),
+    ) as mock_cost, patch.object(
+        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
+    ), patch.object(
+        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    ):
+        await coord._fetch_meter_window(
+            _make_meter(),
+            datetime(2026, 5, 21, 10, tzinfo=UTC),
+            datetime(2026, 5, 21, 12, tzinfo=UTC),
+            write_stats=True,
+            force_start=True,
+        )
+    # 2 energy streams (consumption + production) and 2 cost streams (cost + compensation)
+    assert mock_energy.await_count == 2
+    assert mock_cost.await_count == 2
+    cost_ids = {call.args[1].statistic_id for call in mock_cost.await_args_list}
+    assert cost_ids == {"estfeed:home_cost_089n", "estfeed:home_compensation_089n"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_meter_window_skips_cost_for_gas_meter(hass):
+    client = MagicMock()
+    client.get_metering_data = AsyncMock(
+        return_value=[MeterData(eic="38ZEE-00720099-G", intervals=[], error=None)]
+    )
+    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
+    coord.meters = [_gas_meter()]
+    mock_nps = MagicMock()
+    mock_nps.async_get_prices = AsyncMock(return_value={})
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_cost_statistics",
+        new=AsyncMock(),
+    ) as mock_cost, patch.object(
+        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
+    ), patch.object(
+        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    ):
+        await coord._fetch_meter_window(
+            _gas_meter(),
+            datetime(2026, 5, 21, 10, tzinfo=UTC),
+            datetime(2026, 5, 21, 12, tzinfo=UTC),
+            write_stats=True,
+            force_start=True,
+        )
+    mock_cost.assert_not_called()
+    mock_nps.async_get_prices.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_meter_window_records_nps_error_on_failure(hass):
+    client = MagicMock()
+    client.get_metering_data = AsyncMock(
+        return_value=[
+            MeterData(
+                eic="38ZEE-00720089-N",
+                intervals=[_hour_interval(10, 2.0)],
+                error=None,
+            )
+        ]
+    )
+    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
+    coord.meters = [_make_meter()]
+    mock_nps = MagicMock()
+    from custom_components.estfeed.nps import NpsError
+    mock_nps.async_get_prices = AsyncMock(side_effect=NpsError("boom"))
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_meter_statistics",
+        new=AsyncMock(return_value=2.0),
+    ) as mock_energy, patch(
+        "custom_components.estfeed.coordinator.async_write_cost_statistics",
+        new=AsyncMock(),
+    ) as mock_cost, patch.object(
+        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
+    ), patch.object(
+        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    ):
+        await coord._fetch_meter_window(
+            _make_meter(),
+            datetime(2026, 5, 21, 10, tzinfo=UTC),
+            datetime(2026, 5, 21, 12, tzinfo=UTC),
+            write_stats=True,
+            force_start=True,
+        )
+    # Energy stats still written; cost skipped; error captured.
+    assert mock_energy.await_count == 2
+    mock_cost.assert_not_called()
+    assert coord.last_nps_error is not None
+    assert "boom" in coord.last_nps_error
+
+
+@pytest.mark.asyncio
+async def test_fetch_meter_window_cost_only_skips_energy_writes(hass):
+    client = MagicMock()
+    client.get_metering_data = AsyncMock(
+        return_value=[
+            MeterData(
+                eic="38ZEE-00720089-N",
+                intervals=[_hour_interval(10, 2.0)],
+                error=None,
+            )
+        ]
+    )
+    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
+    coord.meters = [_make_meter()]
+    mock_nps = MagicMock()
+    mock_nps.async_get_prices = AsyncMock(
+        return_value={datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05}
+    )
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_meter_statistics",
+        new=AsyncMock(),
+    ) as mock_energy, patch(
+        "custom_components.estfeed.coordinator.async_write_cost_statistics",
+        new=AsyncMock(return_value=0.1),
+    ) as mock_cost, patch.object(
+        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
+    ), patch.object(
+        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    ):
+        await coord._fetch_meter_window(
+            _make_meter(),
+            datetime(2026, 5, 21, 10, tzinfo=UTC),
+            datetime(2026, 5, 21, 12, tzinfo=UTC),
+            write_stats=True,
+            force_start=True,
+            cost_only=True,
+        )
+    mock_energy.assert_not_called()
+    assert mock_cost.await_count == 2

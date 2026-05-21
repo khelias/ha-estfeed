@@ -280,8 +280,10 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         *,
         write_stats: bool,
         force_start: bool,
+        cost_only: bool = False,
     ) -> None:
         streams = self.streams_for(meter)
+        cost_streams = self.cost_streams_for(meter)
         # Per-stream resume point: each kind tracks its own latest-seen.
         # Sharing one chunk_start across kinds caused the leading kind's
         # historical rows to be re-written with an inflated prior_sum every
@@ -314,17 +316,54 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # sum would offset every historical bucket by whatever the cumulative
         # happens to be right now. Reset to 0.0 so the rewrite is clean.
         prior_sums: dict[str, float] = {}
-        if write_stats:
+        if write_stats and not cost_only:
             for stream in streams:
                 prior_sums[stream.statistic_id] = (
                     0.0 if force_start else await self._prior_sum_for_stream(stream)
                 )
+        # Per-cost-stream resume points and prior sums (electricity only).
+        # Skip the reads entirely when no NPS client is attached — cost writes
+        # are gated on ``self._nps is not None`` below, so the reads would
+        # produce no observable effect and pay an extra recorder round-trip
+        # per stream per fetch.
+        cost_per_stream_start: dict[str, datetime | None] = {}
+        cost_prior_sums: dict[str, float] = {}
+        if write_stats and cost_streams and self._nps is not None:
+            for cstream in cost_streams:
+                # Reuse _latest_seen_for_stream/_prior_sum_for_stream by passing
+                # a StatisticStream-shaped shim — both methods only need
+                # ``statistic_id``.
+                fake = StatisticStream(
+                    statistic_id=cstream.statistic_id,
+                    name=cstream.name,
+                    unit=cstream.unit,
+                    kind=cstream.kind,
+                )
+                cost_per_stream_start[cstream.statistic_id] = (
+                    None if force_start else await self._latest_seen_for_stream(fake)
+                )
+                cost_prior_sums[cstream.statistic_id] = (
+                    0.0 if force_start else await self._prior_sum_for_stream(fake)
+                )
+        tariff = self._build_tariff() if cost_streams else None
         cursor = fetch_start
         while cursor < end:
             chunk_end = min(cursor + timedelta(days=MAX_DAYS_PER_REQUEST), end)
             results = await self._client.get_metering_data(
                 cursor, chunk_end, self.resolution, eics=[meter.eic]
             )
+            # Fetch prices for this chunk once if any cost stream needs them.
+            prices: dict[datetime, float] | None = None
+            if write_stats and cost_streams and self._nps is not None:
+                try:
+                    prices = await self._nps.async_get_prices(cursor, chunk_end)
+                    self.last_nps_error = None
+                except NpsError as err:
+                    self.last_nps_error = str(err)
+                    _LOGGER.warning(
+                        "NPS fetch failed for %s..%s: %s", cursor, chunk_end, err
+                    )
+                    prices = None
             for md in results:
                 if md.error is not None:
                     self.last_meter_errors[md.eic] = md.error.code
@@ -348,7 +387,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                         relevant = md.intervals
                     else:
                         relevant = [i for i in md.intervals if i.period_start >= threshold]
-                    if write_stats:
+                    if write_stats and not cost_only:
                         prior_sums[stream.statistic_id] = await async_write_meter_statistics(
                             self.hass,
                             stream,
@@ -356,6 +395,23 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                             prior_sum=prior_sums[stream.statistic_id],
                         )
                     self._update_cache(meter.eic, stream.kind, relevant)
+                # Cost streams (electricity only, prices available)
+                if write_stats and cost_streams and prices is not None and tariff is not None:
+                    for cstream in cost_streams:
+                        threshold = cost_per_stream_start[cstream.statistic_id]
+                        relevant_c = (
+                            md.intervals
+                            if threshold is None
+                            else [i for i in md.intervals if i.period_start >= threshold]
+                        )
+                        cost_prior_sums[cstream.statistic_id] = await async_write_cost_statistics(
+                            self.hass,
+                            cstream,
+                            relevant_c,
+                            prices,
+                            tariff,
+                            prior_sum=cost_prior_sums[cstream.statistic_id],
+                        )
             cursor = chunk_end
 
     async def _latest_seen_for_stream(self, stream: StatisticStream) -> datetime | None:
