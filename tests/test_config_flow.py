@@ -20,6 +20,10 @@ from custom_components.estfeed.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_FRIENDLY_NAME,
+    CONF_MARGIN_EUR_PER_KWH,
+    CONF_VAT_PERCENT,
+    DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_VAT_PERCENT,
     DOMAIN,
     CommodityType,
 )
@@ -149,3 +153,53 @@ async def test_options_flow_opens_without_setting_config_entry(hass):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_persists_vat_and_margin(hass):
+    """Options form accepts VAT% and margin and stores them in entry.options."""
+    await _setup_recorder(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CLIENT_ID: "x", CONF_CLIENT_SECRET: "y", CONF_FRIENDLY_NAME: "Home"},
+        options={},
+        unique_id="x",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+
+    submission = {
+        "resolution": "one_hour",
+        "backfill_months": 12,
+        CONF_VAT_PERCENT: 24.0,
+        CONF_MARGIN_EUR_PER_KWH: 0.015,
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submission
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_VAT_PERCENT] == 24.0
+    assert entry.options[CONF_MARGIN_EUR_PER_KWH] == 0.015
+
+
+@pytest.mark.asyncio
+async def test_options_flow_defaults_to_22_percent_vat_and_zero_margin(hass):
+    await _setup_recorder(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CLIENT_ID: "x", CONF_CLIENT_SECRET: "y", CONF_FRIENDLY_NAME: "Home"},
+        options={},
+        unique_id="x",
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"]
+    rendered = {
+        k.schema: k.default()
+        for k in schema.schema.keys()
+        if hasattr(k, "default") and hasattr(k, "schema")
+    }
+    assert rendered[CONF_VAT_PERCENT] == DEFAULT_VAT_PERCENT
+    assert rendered[CONF_MARGIN_EUR_PER_KWH] == DEFAULT_MARGIN_EUR_PER_KWH

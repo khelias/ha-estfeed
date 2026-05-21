@@ -21,9 +21,13 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_FRIENDLY_NAME,
+    CONF_MARGIN_EUR_PER_KWH,
     CONF_RESOLUTION,
+    CONF_VAT_PERCENT,
     DEFAULT_BACKFILL_MONTHS,
     DEFAULT_FRIENDLY_NAME,
+    DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_BACKFILL_MONTHS,
     MIN_BACKFILL_MONTHS,
@@ -131,6 +135,14 @@ class EstfeedOptionsFlow(OptionsFlow):
                     CONF_BACKFILL_MONTHS,
                     default=current.get(CONF_BACKFILL_MONTHS, DEFAULT_BACKFILL_MONTHS),
                 ): vol.All(int, vol.Range(min=MIN_BACKFILL_MONTHS, max=MAX_BACKFILL_MONTHS)),
+                vol.Required(
+                    CONF_VAT_PERCENT,
+                    default=current.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
+                vol.Required(
+                    CONF_MARGIN_EUR_PER_KWH,
+                    default=current.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH),
+                ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
