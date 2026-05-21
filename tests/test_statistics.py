@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
@@ -10,7 +11,9 @@ import pytest
 from custom_components.estfeed.api import AccountingInterval
 from custom_components.estfeed.const import Kind
 from custom_components.estfeed.statistics import (
+    CostStream,
     StatisticStream,
+    async_write_cost_statistics,
     async_write_meter_statistics,
     build_statistic_id,
     compute_statistic_rows,
@@ -254,14 +257,6 @@ def test_compute_statistic_rows_snaps_to_top_of_hour():
     ]
     for s in starts:
         assert s.minute == 0 and s.second == 0 and s.microsecond == 0
-
-
-from collections.abc import Callable
-
-from custom_components.estfeed.statistics import (
-    CostStream,
-    async_write_cost_statistics,
-)
 
 
 def _flat_tariff() -> Callable[[float], float]:

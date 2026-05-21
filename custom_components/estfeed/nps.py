@@ -40,9 +40,7 @@ class EleringNpsClient:
     def cache_size(self) -> int:
         return len(self._cache)
 
-    async def async_get_prices(
-        self, start: datetime, end: datetime
-    ) -> dict[datetime, float]:
+    async def async_get_prices(self, start: datetime, end: datetime) -> dict[datetime, float]:
         """Return hourly EE prices in [start, end) keyed by top-of-hour UTC.
 
         Cache-first: every hour already present in the cache is returned

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -185,7 +186,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
             ),
         ]
 
-    def _build_tariff(self):
+    def _build_tariff(self) -> Callable[[float], float]:
         """Construct the curried tariff function from current options."""
         vat = float(self.options.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT))
         margin = float(self.options.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH))
@@ -386,9 +387,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                     self.last_nps_error = None
                 except NpsError as err:
                     self.last_nps_error = str(err)
-                    _LOGGER.warning(
-                        "NPS fetch failed for %s..%s: %s", cursor, chunk_end, err
-                    )
+                    _LOGGER.warning("NPS fetch failed for %s..%s: %s", cursor, chunk_end, err)
                     prices = None
             for md in results:
                 if md.error is not None:

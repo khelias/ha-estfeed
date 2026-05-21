@@ -157,8 +157,8 @@ class CostStream:
 
     statistic_id: str
     name: str
-    unit: str          # currency code, e.g. "EUR"
-    kind: Kind         # CONSUMPTION → cost; PRODUCTION → compensation
+    unit: str  # currency code, e.g. "EUR"
+    kind: Kind  # CONSUMPTION → cost; PRODUCTION → compensation
 
 
 async def async_write_cost_statistics(

@@ -153,11 +153,9 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     new_options = {**entry.data, **entry.options}
     coordinator.options = new_options
 
-    if (
-        old_options.get(CONF_VAT_PERCENT) != new_options.get(CONF_VAT_PERCENT)
-        or old_options.get(CONF_MARGIN_EUR_PER_KWH)
-        != new_options.get(CONF_MARGIN_EUR_PER_KWH)
-    ):
+    if old_options.get(CONF_VAT_PERCENT) != new_options.get(CONF_VAT_PERCENT) or old_options.get(
+        CONF_MARGIN_EUR_PER_KWH
+    ) != new_options.get(CONF_MARGIN_EUR_PER_KWH):
         hass.async_create_background_task(
             coordinator.async_rebuild_cost(), name=f"{DOMAIN}_cost_rebuild"
         )

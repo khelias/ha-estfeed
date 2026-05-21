@@ -15,12 +15,15 @@ from custom_components.estfeed.api import (
 )
 from custom_components.estfeed.const import (
     CONF_BACKFILL_MONTHS,
+    CONF_MARGIN_EUR_PER_KWH,
     CONF_RESOLUTION,
+    CONF_VAT_PERCENT,
     CommodityType,
     Kind,
     Resolution,
 )
 from custom_components.estfeed.coordinator import CumulativeBaseline, EstfeedCoordinator
+from custom_components.estfeed.statistics import CostStream
 
 
 def _make_meter(eic: str = "38ZEE-00720089-N") -> MeteringPoint:
@@ -1067,12 +1070,6 @@ def test_update_cache_folds_expiring_intervals_into_frozen_sum(hass):
 
 # ---- Task 6 tests: cost_streams_for, _build_tariff, last_nps_error ----
 
-from custom_components.estfeed.const import (
-    CONF_MARGIN_EUR_PER_KWH,
-    CONF_VAT_PERCENT,
-)
-from custom_components.estfeed.statistics import CostStream
-
 
 def _gas_meter() -> MeteringPoint:
     return MeteringPoint(
@@ -1160,16 +1157,17 @@ async def test_fetch_meter_window_writes_cost_and_compensation_for_electricity(h
         }
     )
     coord.attach_nps_client(mock_nps)
-    with patch(
-        "custom_components.estfeed.coordinator.async_write_meter_statistics",
-        new=AsyncMock(return_value=5.0),
-    ) as mock_energy, patch(
-        "custom_components.estfeed.coordinator.async_write_cost_statistics",
-        new=AsyncMock(return_value=0.305),
-    ) as mock_cost, patch.object(
-        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
-    ), patch.object(
-        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    with (
+        patch(
+            "custom_components.estfeed.coordinator.async_write_meter_statistics",
+            new=AsyncMock(return_value=5.0),
+        ) as mock_energy,
+        patch(
+            "custom_components.estfeed.coordinator.async_write_cost_statistics",
+            new=AsyncMock(return_value=0.305),
+        ) as mock_cost,
+        patch.object(coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)),
+        patch.object(coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)),
     ):
         await coord._fetch_meter_window(
             _make_meter(),
@@ -1196,13 +1194,13 @@ async def test_fetch_meter_window_skips_cost_for_gas_meter(hass):
     mock_nps = MagicMock()
     mock_nps.async_get_prices = AsyncMock(return_value={})
     coord.attach_nps_client(mock_nps)
-    with patch(
-        "custom_components.estfeed.coordinator.async_write_cost_statistics",
-        new=AsyncMock(),
-    ) as mock_cost, patch.object(
-        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
-    ), patch.object(
-        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    with (
+        patch(
+            "custom_components.estfeed.coordinator.async_write_cost_statistics",
+            new=AsyncMock(),
+        ) as mock_cost,
+        patch.object(coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)),
+        patch.object(coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)),
     ):
         await coord._fetch_meter_window(
             _gas_meter(),
@@ -1231,18 +1229,20 @@ async def test_fetch_meter_window_records_nps_error_on_failure(hass):
     coord.meters = [_make_meter()]
     mock_nps = MagicMock()
     from custom_components.estfeed.nps import NpsError
+
     mock_nps.async_get_prices = AsyncMock(side_effect=NpsError("boom"))
     coord.attach_nps_client(mock_nps)
-    with patch(
-        "custom_components.estfeed.coordinator.async_write_meter_statistics",
-        new=AsyncMock(return_value=2.0),
-    ) as mock_energy, patch(
-        "custom_components.estfeed.coordinator.async_write_cost_statistics",
-        new=AsyncMock(),
-    ) as mock_cost, patch.object(
-        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
-    ), patch.object(
-        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    with (
+        patch(
+            "custom_components.estfeed.coordinator.async_write_meter_statistics",
+            new=AsyncMock(return_value=2.0),
+        ) as mock_energy,
+        patch(
+            "custom_components.estfeed.coordinator.async_write_cost_statistics",
+            new=AsyncMock(),
+        ) as mock_cost,
+        patch.object(coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)),
+        patch.object(coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)),
     ):
         await coord._fetch_meter_window(
             _make_meter(),
@@ -1277,16 +1277,17 @@ async def test_fetch_meter_window_cost_only_skips_energy_writes(hass):
         return_value={datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05}
     )
     coord.attach_nps_client(mock_nps)
-    with patch(
-        "custom_components.estfeed.coordinator.async_write_meter_statistics",
-        new=AsyncMock(),
-    ) as mock_energy, patch(
-        "custom_components.estfeed.coordinator.async_write_cost_statistics",
-        new=AsyncMock(return_value=0.1),
-    ) as mock_cost, patch.object(
-        coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)
-    ), patch.object(
-        coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)
+    with (
+        patch(
+            "custom_components.estfeed.coordinator.async_write_meter_statistics",
+            new=AsyncMock(),
+        ) as mock_energy,
+        patch(
+            "custom_components.estfeed.coordinator.async_write_cost_statistics",
+            new=AsyncMock(return_value=0.1),
+        ) as mock_cost,
+        patch.object(coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)),
+        patch.object(coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)),
     ):
         await coord._fetch_meter_window(
             _make_meter(),
