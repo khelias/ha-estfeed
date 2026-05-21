@@ -23,9 +23,12 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_FRIENDLY_NAME,
+    CONF_MARGIN_EUR_PER_KWH,
+    CONF_VAT_PERCENT,
     DOMAIN,
     MAX_BACKFILL_MONTHS,
     MIN_BACKFILL_MONTHS,
+    CommodityType,
 )
 from .coordinator import EstfeedCoordinator
 from .nps import EleringNpsClient
@@ -97,6 +100,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not needs_backfill:
             break
 
+    needs_cost_backfill = False
+    for meter in meters:
+        if meter.commodity_type != CommodityType.ELECTRICITY:
+            continue
+        for cstream in coordinator.cost_streams_for(meter):
+            existing = await recorder.async_add_executor_job(
+                get_last_statistics, hass, 1, cstream.statistic_id, True, {"sum"}
+            )
+            if not existing.get(cstream.statistic_id):
+                needs_cost_backfill = True
+                break
+        if needs_cost_backfill:
+            break
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await coordinator.async_config_entry_first_refresh()
 
@@ -108,6 +125,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.async_create_background_task(
             coordinator.async_warm_cache(), name=f"{DOMAIN}_warm_cache"
         )
+        if needs_cost_backfill:
+            # Energy stats already exist; only cost is missing — fill cost
+            # without rewriting the (correct) energy series.
+            hass.async_create_background_task(
+                coordinator.async_rebuild_cost(), name=f"{DOMAIN}_cost_initial_fill"
+            )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
@@ -126,7 +149,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: EstfeedCoordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.options = {**entry.data, **entry.options}
+    old_options = dict(coordinator.options)
+    new_options = {**entry.data, **entry.options}
+    coordinator.options = new_options
+
+    if (
+        old_options.get(CONF_VAT_PERCENT) != new_options.get(CONF_VAT_PERCENT)
+        or old_options.get(CONF_MARGIN_EUR_PER_KWH)
+        != new_options.get(CONF_MARGIN_EUR_PER_KWH)
+    ):
+        hass.async_create_background_task(
+            coordinator.async_rebuild_cost(), name=f"{DOMAIN}_cost_rebuild"
+        )
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
