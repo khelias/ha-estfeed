@@ -32,7 +32,9 @@
         "title": "Estfeed options",
         "data": {
           "resolution": "Data resolution",
-          "backfill_months": "Backfill window (months)"
+          "backfill_months": "Backfill window (months)",
+          "vat_percent": "VAT percentage (%)",
+          "margin_eur_per_kwh": "Margin (EUR/kWh, can be negative)"
         }
       }
     }

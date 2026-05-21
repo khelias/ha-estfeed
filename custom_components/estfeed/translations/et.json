@@ -32,7 +32,9 @@
         "title": "Estfeed seaded",
         "data": {
           "resolution": "Andmete täpsus",
-          "backfill_months": "Ajalooliste andmete aken (kuud)"
+          "backfill_months": "Ajalooliste andmete aken (kuud)",
+          "vat_percent": "Käibemaks (%)",
+          "margin_eur_per_kwh": "Marginaal (EUR/kWh, võib olla negatiivne)"
         }
       }
     }
