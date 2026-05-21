@@ -159,6 +159,11 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         """Expose the underlying client's recent-request ring buffer for diagnostics."""
         return self._client.recent_requests
 
+    @property
+    def nps_cache_size(self) -> int:
+        """Number of cached NPS hourly prices. Zero when no client is attached."""
+        return self._nps.cache_size if self._nps is not None else 0
+
     def cost_streams_for(self, meter: MeteringPoint) -> list[CostStream]:
         """Cost + compensation streams for one meter; empty list for gas."""
         if meter.commodity_type.value != "ELECTRICITY":

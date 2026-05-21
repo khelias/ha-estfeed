@@ -49,6 +49,13 @@ async def async_get_config_entry_diagnostics(
                 )
                 for (eic, kind) in coordinator.baselines
             },
+            "cost_stream_ids": [
+                cstream.statistic_id
+                for m in coordinator.meters
+                for cstream in coordinator.cost_streams_for(m)
+            ],
+            "last_nps_error": coordinator.last_nps_error,
+            "nps_cache_size": coordinator.nps_cache_size,
         },
         "meters": [
             {
