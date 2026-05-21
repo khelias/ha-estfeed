@@ -1298,3 +1298,25 @@ async def test_fetch_meter_window_cost_only_skips_energy_writes(hass):
         )
     mock_energy.assert_not_called()
     assert mock_cost.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_async_rebuild_cost_calls_fetch_with_cost_only_force_start(hass):
+    client = MagicMock()
+    coord = EstfeedCoordinator(
+        hass=hass,
+        client=client,
+        slug="home",
+        options={CONF_BACKFILL_MONTHS: 6},
+    )
+    coord.meters = [_make_meter()]
+    with patch.object(coord, "_fetch_meter_window", new=AsyncMock()) as mock_fetch:
+        await coord.async_rebuild_cost()
+    mock_fetch.assert_awaited_once()
+    kwargs = mock_fetch.await_args.kwargs
+    assert kwargs["cost_only"] is True
+    assert kwargs["force_start"] is True
+    assert kwargs["write_stats"] is True
+    # Window spans backfill_months * 30 days.
+    span_days = (mock_fetch.await_args.args[2] - mock_fetch.await_args.args[1]).days
+    assert span_days >= 6 * 30 - 1

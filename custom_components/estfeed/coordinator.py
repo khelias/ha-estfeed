@@ -238,6 +238,27 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # value computed before the background fill finished. Nudge listeners.
         self.async_update_listeners()
 
+    async def async_rebuild_cost(self) -> None:
+        """Recompute cost/compensation statistics over the configured window.
+
+        Used after VAT/margin option changes and on first run for entries
+        upgraded from a pre-cost version. Does not touch energy statistics.
+        """
+        if not self.meters:
+            return
+        end = datetime.now(tz=UTC)
+        start = end - timedelta(days=self.backfill_months * 30)
+        for meter in self.meters:
+            await self._fetch_meter_window(
+                meter,
+                start,
+                end,
+                write_stats=True,
+                force_start=True,
+                cost_only=True,
+            )
+        self.async_update_listeners()
+
     async def async_warm_cache(self) -> None:
         """Populate the rolling 62-day cache after a restart.
 
