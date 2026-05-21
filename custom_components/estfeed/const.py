@@ -19,6 +19,11 @@ DEFAULT_BACKFILL_MONTHS: Final = 12
 MAX_BACKFILL_MONTHS: Final = 84
 MIN_BACKFILL_MONTHS: Final = 1
 
+CONF_VAT_PERCENT: Final = "vat_percent"
+CONF_MARGIN_EUR_PER_KWH: Final = "margin_eur_per_kwh"
+DEFAULT_VAT_PERCENT: Final = 22.0
+DEFAULT_MARGIN_EUR_PER_KWH: Final = 0.0
+
 UPDATE_INTERVAL: Final = timedelta(hours=1)
 ROLLING_CACHE_DAYS: Final = 62
 DATA_FRESH_THRESHOLD: Final = timedelta(hours=30)
