@@ -32,6 +32,25 @@ After setup completes (and the backfill finishes — usually within 1–2 minute
 
 The integration writes external statistics with proper cumulative-sum semantics and a `last_reset` attribute on the cumulative-since-reset sensor, so HA's Energy dashboard handles resets without flagging them as counter rollbacks.
 
+### Cost & compensation statistics
+
+For electricity meters, the integration also publishes two derived external statistics in EUR:
+
+- `estfeed:<your_name>_cost_<eic_suffix>` — cumulative cost of consumed energy
+- `estfeed:<your_name>_compensation_<eic_suffix>` — cumulative compensation for produced energy
+
+Both are computed by multiplying each hour's consumption/production by the matching Nord Pool spot price for the EE bidding zone (fetched from the Elering NPS API), then applying a configurable tariff: `spot × (1 + VAT%/100) + margin`. Defaults: VAT 22 %, margin 0 €/kWh — adjust in the integration options.
+
+To wire them into the Energy dashboard:
+
+1. Open Settings → Dashboards → Energy → "Grid consumption" for the existing `estfeed:<your_name>_consumption_<eic_suffix>` row.
+2. Under "Use an entity tracking the total costs", select `estfeed:<your_name>_cost_<eic_suffix>`.
+3. Repeat for "Return to grid" → pair `estfeed:<your_name>_production_<eic_suffix>` with `estfeed:<your_name>_compensation_<eic_suffix>`.
+
+Changing VAT or margin in the integration options automatically rebuilds the cost/compensation history over the configured backfill window, so the dashboard reflects the new tariff retroactively.
+
+Gas meters do not publish cost statistics (no spot-price source).
+
 ## Entities created
 
 For each metering point:
