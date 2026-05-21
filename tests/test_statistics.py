@@ -256,6 +256,86 @@ def test_compute_statistic_rows_snaps_to_top_of_hour():
         assert s.minute == 0 and s.second == 0 and s.microsecond == 0
 
 
+from collections.abc import Callable
+
+from custom_components.estfeed.statistics import (
+    CostStream,
+    async_write_cost_statistics,
+)
+
+
+def _flat_tariff() -> Callable[[float], float]:
+    return lambda spot: spot  # identity → easy arithmetic in tests
+
+
+@pytest.mark.asyncio
+async def test_async_write_cost_statistics_writes_eur_metadata(hass):
+    intervals = [
+        AccountingInterval(
+            period_start=datetime(2026, 5, 21, 10, tzinfo=UTC),
+            consumption_kwh=2.0,
+            production_kwh=None,
+            consumption_m3=None,
+            production_m3=None,
+        )
+    ]
+    prices = {datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05}
+    stream = CostStream(
+        statistic_id="estfeed:home_cost_089n",
+        name="Home cost (089n)",
+        unit="EUR",
+        kind=Kind.CONSUMPTION,
+    )
+    with patch(
+        "custom_components.estfeed.statistics.async_add_external_statistics",
+        new=Mock(),
+    ) as mock_add:
+        result = await async_write_cost_statistics(
+            hass, stream, intervals, prices, _flat_tariff(), prior_sum=0.0
+        )
+    mock_add.assert_called_once()
+    metadata, rows = mock_add.call_args.args[1], mock_add.call_args.args[2]
+    assert metadata["statistic_id"] == "estfeed:home_cost_089n"
+    assert metadata["unit_of_measurement"] == "EUR"
+    assert metadata["has_sum"] is True
+    assert metadata["has_mean"] is False
+    # No unit_class for monetary streams — unit_class is for unit conversion.
+    assert "unit_class" not in metadata
+    assert len(rows) == 1
+    assert rows[0]["sum"] == pytest.approx(0.10)
+    assert result == pytest.approx(0.10)
+
+
+@pytest.mark.asyncio
+async def test_async_write_cost_statistics_noop_when_no_priceable_rows(hass):
+    """No matching prices → nothing to write, returns prior_sum unchanged."""
+    intervals = [
+        AccountingInterval(
+            period_start=datetime(2026, 5, 21, 10, tzinfo=UTC),
+            consumption_kwh=2.0,
+            production_kwh=None,
+            consumption_m3=None,
+            production_m3=None,
+        )
+    ]
+    prices: dict[datetime, float] = {}
+    stream = CostStream(
+        statistic_id="estfeed:home_cost_089n",
+        name="x",
+        unit="EUR",
+        kind=Kind.CONSUMPTION,
+    )
+    with patch(
+        "custom_components.estfeed.statistics.async_add_external_statistics",
+        new=Mock(),
+    ) as mock_add:
+        result = await async_write_cost_statistics(
+            hass, stream, intervals, prices, _flat_tariff(), prior_sum=42.0
+        )
+    mock_add.assert_not_called()
+    assert result == 42.0
+
+
 def test_compute_statistic_rows_aggregates_subhour_intervals():
     """Quarter-hour intervals in the same hour are summed into one bucket."""
     intervals = [

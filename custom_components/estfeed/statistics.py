@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
@@ -11,6 +13,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import AccountingInterval
 from .const import DOMAIN, Kind
+from .pricing import compute_cost_rows
 
 # HA 2026.11 will require `mean_type` in StatisticMetaData; older HA versions
 # don't expose StatisticMeanType. Detect at import time and only set the field
@@ -143,6 +146,50 @@ async def async_write_meter_statistics(
         metadata["unit_class"] = unit_class  # type: ignore[typeddict-unknown-key]
     # async_add_external_statistics is a synchronous @callback in this HA version
     # (inspect.iscoroutinefunction returned False); no await needed.
+    async_add_external_statistics(hass, metadata, rows)
+    last_sum = rows[-1].get("sum")
+    return float(last_sum) if last_sum is not None else prior_sum
+
+
+@dataclass(frozen=True, slots=True)
+class CostStream:
+    """Identifies one cost/compensation external statistics stream."""
+
+    statistic_id: str
+    name: str
+    unit: str          # currency code, e.g. "EUR"
+    kind: Kind         # CONSUMPTION → cost; PRODUCTION → compensation
+
+
+async def async_write_cost_statistics(
+    hass: HomeAssistant,
+    stream: CostStream,
+    intervals: list[AccountingInterval],
+    prices: dict[datetime, float],
+    tariff: Callable[[float], float],
+    prior_sum: float,
+) -> float:
+    """Compute cost rows for one meter+kind and publish them.
+
+    Returns the running cumulative sum after writing (equal to ``prior_sum``
+    if no priceable rows were produced). Caller chains the return value as
+    the next chunk's ``prior_sum`` to avoid a read-after-write hazard
+    against HA's recorder (statistics writes may not flush synchronously).
+    """
+    rows = compute_cost_rows(intervals, stream.kind, prices, tariff, prior_sum=prior_sum)
+    if not rows:
+        return prior_sum
+    metadata: StatisticMetaData = {
+        "source": DOMAIN,
+        "statistic_id": stream.statistic_id,
+        "name": stream.name,
+        "unit_of_measurement": stream.unit,
+        "has_sum": True,
+        "has_mean": False,
+    }
+    if _MEAN_TYPE_NONE is not None:
+        metadata["mean_type"] = _MEAN_TYPE_NONE  # type: ignore[typeddict-unknown-key]
+    # No unit_class — unit_class is for energy/volume/mass conversion, not currencies.
     async_add_external_statistics(hass, metadata, rows)
     last_sum = rows[-1].get("sum")
     return float(last_sum) if last_sum is not None else prior_sum
