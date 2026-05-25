@@ -84,7 +84,12 @@ class EleringNpsClient:
         except TimeoutError as err:
             raise NpsError(f"NPS request timed out: {err}") from err
 
+        # Elering switched to 15-min resolution in 2025: each hour now carries
+        # up to 4 quarter rows. Aggregate to the hourly mean before caching —
+        # writing each row directly would let the last :45 quarter overwrite
+        # the others and badly mis-represent volatile hours.
         rows = (payload or {}).get("data", {}).get("ee", [])
+        buckets: dict[datetime, list[float]] = {}
         for row in rows:
             ts = row.get("timestamp")
             price_eur_per_mwh = row.get("price")
@@ -93,4 +98,6 @@ class EleringNpsClient:
             hour = datetime.fromtimestamp(int(ts), tz=UTC).replace(
                 minute=0, second=0, microsecond=0
             )
-            self._cache[hour] = float(price_eur_per_mwh) / 1000.0
+            buckets.setdefault(hour, []).append(float(price_eur_per_mwh))
+        for hour, prices in buckets.items():
+            self._cache[hour] = (sum(prices) / len(prices)) / 1000.0

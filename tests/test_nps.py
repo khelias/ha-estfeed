@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import aiohttp
 import pytest
@@ -125,6 +125,31 @@ async def test_async_get_prices_empty_range_no_http(session):
             datetime(2026, 5, 21, 0, tzinfo=UTC),
         )
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_async_get_prices_aggregates_quarter_hour_to_hourly_mean(session):
+    """Elering switched to 15-min resolution: 4 quarter rows per hour. Aggregate
+    them to the hourly mean instead of letting later quarters overwrite earlier ones.
+    """
+    hour0 = datetime(2026, 5, 24, 12, tzinfo=UTC)
+    # Four quarter-hour rows in the same hour with very different prices
+    # (May 24 EE saw prices swing within the hour). Mean = (2.86+2.34+6.85+6.85)/4 = 4.725 €/MWh.
+    raw_rows = [
+        {"timestamp": int((hour0).timestamp()), "price": 2.86},
+        {"timestamp": int((hour0 + timedelta(minutes=15)).timestamp()), "price": 2.34},
+        {"timestamp": int((hour0 + timedelta(minutes=30)).timestamp()), "price": 6.85},
+        {"timestamp": int((hour0 + timedelta(minutes=45)).timestamp()), "price": 6.85},
+    ]
+    with aioresponses() as m:
+        m.get(
+            NPS_URL_RE,
+            payload={"success": True, "data": {"ee": raw_rows}},
+        )
+        client = EleringNpsClient(session)
+        prices = await client.async_get_prices(hour0, hour0 + timedelta(hours=1))
+    # Hourly mean in EUR/kWh = 4.725 / 1000 = 0.004725
+    assert prices == {hour0: pytest.approx(0.004725)}
 
 
 @pytest.mark.asyncio
