@@ -153,6 +153,21 @@ async def test_async_get_prices_aggregates_quarter_hour_to_hourly_mean(session):
 
 
 @pytest.mark.asyncio
+async def test_clear_cache_empties_internal_dict(session):
+    raw = {datetime(2026, 5, 21, h, tzinfo=UTC): 50.0 for h in range(3)}
+    with aioresponses() as m:
+        m.get(NPS_URL_RE, payload=_stub_response(raw))
+        client = EleringNpsClient(session)
+        await client.async_get_prices(
+            datetime(2026, 5, 21, 0, tzinfo=UTC),
+            datetime(2026, 5, 21, 3, tzinfo=UTC),
+        )
+        assert client.cache_size == 3
+        client.clear_cache()
+        assert client.cache_size == 0
+
+
+@pytest.mark.asyncio
 async def test_async_get_prices_cache_size_property(session):
     raw = {datetime(2026, 5, 21, h, tzinfo=UTC): 50.0 for h in range(3)}
     with aioresponses() as m:

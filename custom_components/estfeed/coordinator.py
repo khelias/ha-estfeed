@@ -252,6 +252,12 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         """
         if not self.meters:
             return
+        # Drop any prior cached prices so a rebuild can never re-use a
+        # partial-data mean (Elering's 15-min quarters land progressively;
+        # hours fetched before all 4 quarters settle would otherwise live
+        # in the cache as a partial mean forever).
+        if self._nps is not None:
+            self._nps.clear_cache()
         end = datetime.now(tz=UTC)
         start = end - timedelta(days=self.backfill_months * 30)
         for meter in self.meters:

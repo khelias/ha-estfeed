@@ -40,6 +40,16 @@ class EleringNpsClient:
     def cache_size(self) -> int:
         return len(self._cache)
 
+    def clear_cache(self) -> None:
+        """Drop every cached hour.
+
+        Used at the start of a cost rebuild so prior partial-data entries
+        (Elering publishes 15-min quarters as they settle; an hour fetched
+        before all 4 quarters land would be cached at the partial mean and
+        never refreshed) cannot poison the rewrite.
+        """
+        self._cache.clear()
+
     async def async_get_prices(self, start: datetime, end: datetime) -> dict[datetime, float]:
         """Return hourly EE prices in [start, end) keyed by top-of-hour UTC.
 
