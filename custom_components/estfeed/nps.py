@@ -50,6 +50,16 @@ class EleringNpsClient:
         """
         self._cache.clear()
 
+    def cache_snapshot(self, hours: list[datetime]) -> dict[str, float | None]:
+        """Return cached EUR/kWh prices for the given hours, keyed by ISO string.
+
+        Used by diagnostics to inspect what the rebuild actually stored — when
+        cost statistics look wrong, comparing the cached price for a known
+        problem hour against Elering's current published value pinpoints
+        whether the bug is in the fetch path or downstream.
+        """
+        return {h.isoformat(): self._cache.get(h) for h in hours}
+
     async def async_get_prices(self, start: datetime, end: datetime) -> dict[datetime, float]:
         """Return hourly EE prices in [start, end) keyed by top-of-hour UTC.
 

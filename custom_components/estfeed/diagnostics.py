@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -20,6 +21,15 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator: EstfeedCoordinator = hass.data[DOMAIN][entry.entry_id]
+    # Sample the cached NPS prices for the last 36 hours (top-of-hour UTC).
+    # When cost statistics look wrong, comparing these values against
+    # https://dashboard.elering.ee/api/nps/price quarter prices pinpoints
+    # whether the bug is in the fetch path (mean mis-computed) or downstream.
+    now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+    sample_hours = [now_hour - timedelta(hours=h) for h in range(36)]
+    nps_cache_recent = (
+        coordinator._nps.cache_snapshot(sample_hours) if coordinator._nps is not None else {}
+    )
     return {
         "entry": {
             "title": entry.title,
@@ -56,6 +66,7 @@ async def async_get_config_entry_diagnostics(
             ],
             "last_nps_error": coordinator.last_nps_error,
             "nps_cache_size": coordinator.nps_cache_size,
+            "nps_cache_recent": nps_cache_recent,
         },
         "meters": [
             {
