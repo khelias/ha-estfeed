@@ -8,7 +8,12 @@ import pytest
 
 from custom_components.estfeed.api import AccountingInterval
 from custom_components.estfeed.const import Kind
-from custom_components.estfeed.pricing import apply_tariff, compute_cost_rows, make_tariff
+from custom_components.estfeed.pricing import (
+    apply_tariff,
+    compute_cost_rows,
+    compute_cost_rows_from_hourly,
+    make_tariff,
+)
 
 
 def _interval(
@@ -180,3 +185,55 @@ def test_compute_cost_rows_rounds_to_four_decimals():
     tariff = make_tariff(0.0, 0.0)
     rows = compute_cost_rows(intervals, Kind.CONSUMPTION, prices, tariff, prior_sum=0.0)
     assert rows[0]["sum"] == pytest.approx(0.0167)
+
+
+def test_compute_cost_rows_from_hourly_basic():
+    # Two hours of energy, flat 0.05 €/kWh, no VAT/margin → cumulative cost.
+    hourly = {
+        datetime(2026, 5, 21, 10, tzinfo=UTC): 2.0,
+        datetime(2026, 5, 21, 11, tzinfo=UTC): 3.0,
+    }
+    prices = {
+        datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05,
+        datetime(2026, 5, 21, 11, tzinfo=UTC): 0.05,
+    }
+    tariff = make_tariff(0.0, 0.0)
+    rows = compute_cost_rows_from_hourly(hourly, prices, tariff, prior_sum=0.0)
+    assert [r["sum"] for r in rows] == [pytest.approx(0.1), pytest.approx(0.25)]
+
+
+def test_compute_cost_rows_from_hourly_skips_missing_price():
+    hourly = {
+        datetime(2026, 5, 21, 10, tzinfo=UTC): 2.0,
+        datetime(2026, 5, 21, 11, tzinfo=UTC): 3.0,
+    }
+    # Only hour 11 has a price.
+    prices = {datetime(2026, 5, 21, 11, tzinfo=UTC): 0.05}
+    tariff = make_tariff(0.0, 0.0)
+    rows = compute_cost_rows_from_hourly(hourly, prices, tariff, prior_sum=0.0)
+    assert len(rows) == 1
+    assert rows[0]["start"] == datetime(2026, 5, 21, 11, tzinfo=UTC)
+    assert rows[0]["sum"] == pytest.approx(0.15)
+
+
+def test_compute_cost_rows_delegates_to_hourly_builder():
+    # compute_cost_rows must produce identical output to first bucketing
+    # intervals then calling the hourly builder.
+    intervals = [
+        _interval(10, 0, consumption=0.5),
+        _interval(10, 15, consumption=0.5),
+        _interval(11, 0, consumption=1.0),
+    ]
+    prices = {datetime(2026, 5, 21, h, tzinfo=UTC): 0.05 for h in (10, 11)}
+    tariff = make_tariff(22.0, 0.0)
+    via_intervals = compute_cost_rows(intervals, Kind.CONSUMPTION, prices, tariff, prior_sum=0.0)
+    via_hourly = compute_cost_rows_from_hourly(
+        {
+            datetime(2026, 5, 21, 10, tzinfo=UTC): 1.0,
+            datetime(2026, 5, 21, 11, tzinfo=UTC): 1.0,
+        },
+        prices,
+        tariff,
+        prior_sum=0.0,
+    )
+    assert via_intervals == via_hourly

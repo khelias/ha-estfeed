@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import AccountingInterval
 from .const import DOMAIN, Kind
-from .pricing import compute_cost_rows
+from .pricing import compute_cost_rows, compute_cost_rows_from_hourly
 
 # HA 2026.11 will require `mean_type` in StatisticMetaData; older HA versions
 # don't expose StatisticMeanType. Detect at import time and only set the field
@@ -161,22 +161,13 @@ class CostStream:
     kind: Kind  # CONSUMPTION → cost; PRODUCTION → compensation
 
 
-async def async_write_cost_statistics(
+def _publish_cost_rows(
     hass: HomeAssistant,
     stream: CostStream,
-    intervals: list[AccountingInterval],
-    prices: dict[datetime, float],
-    tariff: Callable[[float], float],
+    rows: list[StatisticData],
     prior_sum: float,
 ) -> float:
-    """Compute cost rows for one meter+kind and publish them.
-
-    Returns the running cumulative sum after writing (equal to ``prior_sum``
-    if no priceable rows were produced). Caller chains the return value as
-    the next chunk's ``prior_sum`` to avoid a read-after-write hazard
-    against HA's recorder (statistics writes may not flush synchronously).
-    """
-    rows = compute_cost_rows(intervals, stream.kind, prices, tariff, prior_sum=prior_sum)
+    """Publish prebuilt cost rows and return the new running cumulative sum."""
     if not rows:
         return prior_sum
     metadata: StatisticMetaData = {
@@ -193,3 +184,42 @@ async def async_write_cost_statistics(
     async_add_external_statistics(hass, metadata, rows)
     last_sum = rows[-1].get("sum")
     return float(last_sum) if last_sum is not None else prior_sum
+
+
+async def async_write_cost_statistics(
+    hass: HomeAssistant,
+    stream: CostStream,
+    intervals: list[AccountingInterval],
+    prices: dict[datetime, float],
+    tariff: Callable[[float], float],
+    prior_sum: float,
+) -> float:
+    """Compute cost rows from raw intervals for one meter+kind and publish them.
+
+    Used by the regular hourly tick, where energy and cost are derived from the
+    same freshly-fetched intervals so they stay consistent. Returns the running
+    cumulative sum after writing (equal to ``prior_sum`` if no priceable rows
+    were produced). Caller chains the return value as the next chunk's
+    ``prior_sum`` to avoid a read-after-write hazard against HA's recorder.
+    """
+    rows = compute_cost_rows(intervals, stream.kind, prices, tariff, prior_sum=prior_sum)
+    return _publish_cost_rows(hass, stream, rows, prior_sum)
+
+
+async def async_write_cost_statistics_from_hourly(
+    hass: HomeAssistant,
+    stream: CostStream,
+    hourly_energy: dict[datetime, float],
+    prices: dict[datetime, float],
+    tariff: Callable[[float], float],
+    prior_sum: float,
+) -> float:
+    """Publish cost rows derived from a per-hour energy map.
+
+    Used by ``async_rebuild_cost``: pricing the *stored* hourly energy
+    statistics rather than a fresh API fetch guarantees the cost series stays
+    exactly consistent with the consumption/production the user already sees,
+    even when Estfeed revises recent intervals between fetches.
+    """
+    rows = compute_cost_rows_from_hourly(hourly_energy, prices, tariff, prior_sum=prior_sum)
+    return _publish_cost_rows(hass, stream, rows, prior_sum)

@@ -14,6 +14,7 @@ from custom_components.estfeed.statistics import (
     CostStream,
     StatisticStream,
     async_write_cost_statistics,
+    async_write_cost_statistics_from_hourly,
     async_write_meter_statistics,
     build_statistic_id,
     compute_statistic_rows,
@@ -329,6 +330,40 @@ async def test_async_write_cost_statistics_noop_when_no_priceable_rows(hass):
         )
     mock_add.assert_not_called()
     assert result == 42.0
+
+
+@pytest.mark.asyncio
+async def test_async_write_cost_statistics_from_hourly_prices_stored_energy(hass):
+    """Cost is derived from a per-hour energy map (the stored stats), not API
+    intervals — guaranteeing it tracks the published consumption exactly."""
+    hourly = {
+        datetime(2026, 5, 21, 10, tzinfo=UTC): 2.0,
+        datetime(2026, 5, 21, 11, tzinfo=UTC): 1.0,
+    }
+    prices = {
+        datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05,
+        datetime(2026, 5, 21, 11, tzinfo=UTC): 0.05,
+    }
+    stream = CostStream(
+        statistic_id="estfeed:home_cost_089n",
+        name="Home cost (089n)",
+        unit="EUR",
+        kind=Kind.CONSUMPTION,
+    )
+    with patch(
+        "custom_components.estfeed.statistics.async_add_external_statistics",
+        new=Mock(),
+    ) as mock_add:
+        result = await async_write_cost_statistics_from_hourly(
+            hass, stream, hourly, prices, _flat_tariff(), prior_sum=0.0
+        )
+    mock_add.assert_called_once()
+    metadata, rows = mock_add.call_args.args[1], mock_add.call_args.args[2]
+    assert metadata["unit_of_measurement"] == "EUR"
+    assert "unit_class" not in metadata
+    # cumulative: 2.0*0.05=0.10 then +1.0*0.05=0.15
+    assert [r["sum"] for r in rows] == [pytest.approx(0.10), pytest.approx(0.15)]
+    assert result == pytest.approx(0.15)
 
 
 def test_compute_statistic_rows_aggregates_subhour_intervals():

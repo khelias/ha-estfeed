@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from homeassistant.components.recorder.statistics import get_last_statistics
+from homeassistant.components.recorder.statistics import (
+    get_last_statistics,
+    statistics_during_period,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.helpers.storage import Store
@@ -41,6 +44,7 @@ from .statistics import (
     CostStream,
     StatisticStream,
     async_write_cost_statistics,
+    async_write_cost_statistics_from_hourly,
     async_write_meter_statistics,
     build_statistic_id,
     eic_suffix,
@@ -249,27 +253,88 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
 
         Used after VAT/margin option changes and on first run for entries
         upgraded from a pre-cost version. Does not touch energy statistics.
+
+        Cost is derived from the *stored* hourly energy statistics (not a fresh
+        Estfeed fetch) so it stays exactly consistent with the consumption the
+        user already sees on the Energy dashboard. Re-fetching would let
+        Estfeed's still-settling recent intervals drift the cost away from the
+        published energy — the bug this method exists to avoid.
         """
-        if not self.meters:
+        if not self.meters or self._nps is None:
             return
         # Drop any prior cached prices so a rebuild can never re-use a
         # partial-data mean (Elering's 15-min quarters land progressively;
         # hours fetched before all 4 quarters settle would otherwise live
         # in the cache as a partial mean forever).
-        if self._nps is not None:
-            self._nps.clear_cache()
-        end = datetime.now(tz=UTC)
+        self._nps.clear_cache()
+        tariff = self._build_tariff()
+        end = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
         start = end - timedelta(days=self.backfill_months * 30)
+
+        # Warm the price cache one bounded chunk at a time — a single 360-day
+        # request would return ~35k quarter rows and risk an Elering timeout.
+        cursor = start
+        while cursor < end:
+            chunk_end = min(cursor + timedelta(days=MAX_DAYS_PER_REQUEST), end)
+            try:
+                await self._nps.async_get_prices(cursor, chunk_end)
+                self.last_nps_error = None
+            except NpsError as err:
+                self.last_nps_error = str(err)
+                _LOGGER.warning("NPS fetch failed for %s..%s: %s", cursor, chunk_end, err)
+            cursor = chunk_end
+        prices = await self._nps.async_get_prices(start, end)  # all served from cache
+
         for meter in self.meters:
-            await self._fetch_meter_window(
-                meter,
-                start,
-                end,
-                write_stats=True,
-                force_start=True,
-                cost_only=True,
-            )
+            cost_streams = self.cost_streams_for(meter)
+            if not cost_streams:
+                continue
+            energy_id_by_kind = {s.kind: s.statistic_id for s in self.streams_for(meter)}
+            for cstream in cost_streams:
+                energy_id = energy_id_by_kind.get(cstream.kind)
+                if energy_id is None:
+                    continue
+                hourly_energy = await self._hourly_energy_from_stats(energy_id, start, end)
+                await async_write_cost_statistics_from_hourly(
+                    self.hass,
+                    cstream,
+                    hourly_energy,
+                    prices,
+                    tariff,
+                    prior_sum=0.0,
+                )
         self.async_update_listeners()
+
+    async def _hourly_energy_from_stats(
+        self, statistic_id: str, start: datetime, end: datetime
+    ) -> dict[datetime, float]:
+        """Read per-hour energy (kWh) for a stored statistic over [start, end).
+
+        Returns top-of-hour UTC → energy delta for that hour, taken from the
+        recorder's own ``change`` aggregation so it matches exactly what the
+        Energy dashboard shows.
+        """
+        stats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            start,
+            end,
+            {statistic_id},
+            "hour",
+            None,
+            {"change"},
+        )
+        result: dict[datetime, float] = {}
+        for row in stats.get(statistic_id, []):
+            change = row.get("change")
+            start_ts = row.get("start")
+            if change is None or start_ts is None:
+                continue
+            hour = datetime.fromtimestamp(float(start_ts), tz=UTC).replace(
+                minute=0, second=0, microsecond=0
+            )
+            result[hour] = float(change)
+        return result
 
     async def async_warm_cache(self) -> None:
         """Populate the rolling 62-day cache after a restart.
@@ -313,7 +378,6 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         *,
         write_stats: bool,
         force_start: bool,
-        cost_only: bool = False,
     ) -> None:
         streams = self.streams_for(meter)
         cost_streams = self.cost_streams_for(meter)
@@ -349,7 +413,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # sum would offset every historical bucket by whatever the cumulative
         # happens to be right now. Reset to 0.0 so the rewrite is clean.
         prior_sums: dict[str, float] = {}
-        if write_stats and not cost_only:
+        if write_stats:
             for stream in streams:
                 prior_sums[stream.statistic_id] = (
                     0.0 if force_start else await self._prior_sum_for_stream(stream)
@@ -418,7 +482,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                         relevant = md.intervals
                     else:
                         relevant = [i for i in md.intervals if i.period_start >= threshold]
-                    if write_stats and not cost_only:
+                    if write_stats:
                         prior_sums[stream.statistic_id] = await async_write_meter_statistics(
                             self.hass,
                             stream,

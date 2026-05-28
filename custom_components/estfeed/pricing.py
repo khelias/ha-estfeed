@@ -67,13 +67,33 @@ def compute_cost_rows(
         bucket = ival.period_start.replace(minute=0, second=0, microsecond=0)
         hourly[bucket] = hourly.get(bucket, 0.0) + float(value)
 
+    return compute_cost_rows_from_hourly(hourly, prices, tariff, prior_sum)
+
+
+def compute_cost_rows_from_hourly(
+    hourly_energy: dict[datetime, float],
+    prices: dict[datetime, float],
+    tariff: Callable[[float], float],
+    prior_sum: float,
+) -> list[StatisticData]:
+    """Build cumulative-sum cost rows from a per-hour energy map.
+
+    ``hourly_energy`` maps top-of-hour UTC to the kWh consumed/produced that
+    hour. Each hour's energy is multiplied by ``tariff(prices[hour])`` and
+    accumulated into a running EUR series. Hours with no matching price (NPS
+    gap or future hour) are skipped. Rounds to 4 decimals (€0.0001).
+
+    Deriving cost from stored hourly energy (rather than re-fetched API
+    intervals) keeps the cost statistic exactly consistent with the published
+    consumption/production statistics it is meant to price.
+    """
     rows: list[StatisticData] = []
     running = prior_sum
-    for start in sorted(hourly):
+    for start in sorted(hourly_energy):
         price = prices.get(start)
         if price is None:
             continue
-        cost = round(hourly[start] * tariff(price), 4)
+        cost = round(hourly_energy[start] * tariff(price), 4)
         running = round(running + cost, 4)
         rows.append({"start": start, "state": running, "sum": running})
     return rows

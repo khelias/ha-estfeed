@@ -1259,65 +1259,55 @@ async def test_fetch_meter_window_records_nps_error_on_failure(hass):
 
 
 @pytest.mark.asyncio
-async def test_fetch_meter_window_cost_only_skips_energy_writes(hass):
+async def test_async_rebuild_cost_derives_from_stored_energy_not_api(hass):
+    """async_rebuild_cost must price the STORED hourly energy stats, never a
+    fresh Estfeed fetch — otherwise still-settling recent intervals drift the
+    cost away from the published consumption (the bug this guards against)."""
     client = MagicMock()
     client.get_metering_data = AsyncMock(
-        return_value=[
-            MeterData(
-                eic="38ZEE-00720089-N",
-                intervals=[_hour_interval(10, 2.0)],
-                error=None,
-            )
-        ]
+        side_effect=AssertionError("rebuild must not re-fetch metering data")
     )
-    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
-    coord.meters = [_make_meter()]
-    mock_nps = MagicMock()
-    mock_nps.async_get_prices = AsyncMock(
-        return_value={datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05}
-    )
-    coord.attach_nps_client(mock_nps)
-    with (
-        patch(
-            "custom_components.estfeed.coordinator.async_write_meter_statistics",
-            new=AsyncMock(),
-        ) as mock_energy,
-        patch(
-            "custom_components.estfeed.coordinator.async_write_cost_statistics",
-            new=AsyncMock(return_value=0.1),
-        ) as mock_cost,
-        patch.object(coord, "_latest_seen_for_stream", new=AsyncMock(return_value=None)),
-        patch.object(coord, "_prior_sum_for_stream", new=AsyncMock(return_value=0.0)),
-    ):
-        await coord._fetch_meter_window(
-            _make_meter(),
-            datetime(2026, 5, 21, 10, tzinfo=UTC),
-            datetime(2026, 5, 21, 12, tzinfo=UTC),
-            write_stats=True,
-            force_start=True,
-            cost_only=True,
-        )
-    mock_energy.assert_not_called()
-    assert mock_cost.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_async_rebuild_cost_calls_fetch_with_cost_only_force_start(hass):
-    client = MagicMock()
     coord = EstfeedCoordinator(
         hass=hass,
         client=client,
         slug="home",
-        options={CONF_BACKFILL_MONTHS: 6},
+        options={CONF_BACKFILL_MONTHS: 6, CONF_VAT_PERCENT: 22.0, CONF_MARGIN_EUR_PER_KWH: 0.0},
     )
     coord.meters = [_make_meter()]
-    with patch.object(coord, "_fetch_meter_window", new=AsyncMock()) as mock_fetch:
+    h10 = datetime(2026, 5, 21, 10, tzinfo=UTC)
+    mock_nps = MagicMock()
+    mock_nps.clear_cache = MagicMock()
+    mock_nps.async_get_prices = AsyncMock(return_value={h10: 0.05})
+    coord.attach_nps_client(mock_nps)
+
+    # Stored consumption stat says 2.0 kWh for hour 10; production empty.
+    async def _fake_hourly(statistic_id, start, end):  # noqa: ARG001
+        return {h10: 2.0} if "consumption" in statistic_id else {}
+
+    with (
+        patch.object(coord, "_hourly_energy_from_stats", new=AsyncMock(side_effect=_fake_hourly)),
+        patch(
+            "custom_components.estfeed.coordinator.async_write_cost_statistics_from_hourly",
+            new=AsyncMock(return_value=0.122),
+        ) as mock_write,
+    ):
         await coord.async_rebuild_cost()
-    mock_fetch.assert_awaited_once()
-    kwargs = mock_fetch.await_args.kwargs
-    assert kwargs["cost_only"] is True
-    assert kwargs["force_start"] is True
-    assert kwargs["write_stats"] is True
-    # Window spans backfill_months * 30 days.
-    span_days = (mock_fetch.await_args.args[2] - mock_fetch.await_args.args[1]).days
-    assert span_days >= 6 * 30 - 1
+
+    mock_nps.clear_cache.assert_called_once()
+    # Consumption cost stream written from the stored 2.0 kWh map.
+    consumption_calls = [
+        c for c in mock_write.await_args_list if "_cost_" in c.args[1].statistic_id
+    ]
+    assert len(consumption_calls) == 1
+    assert consumption_calls[0].args[2] == {h10: 2.0}  # hourly_energy arg
+
+
+@pytest.mark.asyncio
+async def test_async_rebuild_cost_noop_without_nps_client(hass):
+    client = MagicMock()
+    coord = EstfeedCoordinator(hass=hass, client=client, slug="home", options={})
+    coord.meters = [_make_meter()]
+    # No NPS client attached → nothing to do, no crash.
+    with patch.object(coord, "_hourly_energy_from_stats", new=AsyncMock()) as mock_hourly:
+        await coord.async_rebuild_cost()
+    mock_hourly.assert_not_called()
