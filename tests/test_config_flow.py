@@ -19,8 +19,15 @@ from custom_components.estfeed.api import (
 from custom_components.estfeed.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
+    CONF_FEES_EUR_PER_KWH,
     CONF_FRIENDLY_NAME,
+    CONF_GRID_DAY_EUR_PER_KWH,
+    CONF_GRID_NIGHT_EUR_PER_KWH,
     CONF_MARGIN_EUR_PER_KWH,
+    CONF_NIGHT_END_HOUR,
+    CONF_NIGHT_ON_HOLIDAYS,
+    CONF_NIGHT_ON_WEEKENDS,
+    CONF_NIGHT_START_HOUR,
     CONF_VAT_PERCENT,
     DEFAULT_MARGIN_EUR_PER_KWH,
     DEFAULT_VAT_PERCENT,
@@ -180,6 +187,43 @@ async def test_options_flow_persists_vat_and_margin(hass):
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_VAT_PERCENT] == 24.0
     assert entry.options[CONF_MARGIN_EUR_PER_KWH] == 0.015
+    # Grid/fee fields fall back to their defaults when the form omits them.
+    assert entry.options[CONF_GRID_DAY_EUR_PER_KWH] == 0.0
+    assert entry.options[CONF_NIGHT_START_HOUR] == 22
+    assert entry.options[CONF_NIGHT_ON_HOLIDAYS] is True
+
+
+@pytest.mark.asyncio
+async def test_options_flow_persists_grid_tariff(hass):
+    await _setup_recorder(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CLIENT_ID: "x", CONF_CLIENT_SECRET: "y", CONF_FRIENDLY_NAME: "Home"},
+        options={},
+        unique_id="x",
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    submission = {
+        "resolution": "one_hour",
+        "backfill_months": 12,
+        CONF_VAT_PERCENT: 24.0,
+        CONF_MARGIN_EUR_PER_KWH: 0.0047,
+        CONF_FEES_EUR_PER_KWH: 0.0219,
+        CONF_GRID_DAY_EUR_PER_KWH: 0.0369,
+        CONF_GRID_NIGHT_EUR_PER_KWH: 0.021,
+        CONF_NIGHT_START_HOUR: 23,
+        CONF_NIGHT_END_HOUR: 7,
+        CONF_NIGHT_ON_WEEKENDS: True,
+        CONF_NIGHT_ON_HOLIDAYS: False,
+    }
+    result = await hass.config_entries.options.async_configure(result["flow_id"], submission)
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_GRID_DAY_EUR_PER_KWH] == 0.0369
+    assert entry.options[CONF_GRID_NIGHT_EUR_PER_KWH] == 0.021
+    assert entry.options[CONF_FEES_EUR_PER_KWH] == 0.0219
+    assert entry.options[CONF_NIGHT_START_HOUR] == 23
+    assert entry.options[CONF_NIGHT_ON_HOLIDAYS] is False
 
 
 @pytest.mark.asyncio

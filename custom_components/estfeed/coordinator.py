@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Container
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import holidays
 from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     statistics_during_period,
@@ -17,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     AccountingInterval,
@@ -26,10 +28,23 @@ from .api import (
 )
 from .const import (
     CONF_BACKFILL_MONTHS,
+    CONF_FEES_EUR_PER_KWH,
+    CONF_GRID_DAY_EUR_PER_KWH,
+    CONF_GRID_NIGHT_EUR_PER_KWH,
     CONF_MARGIN_EUR_PER_KWH,
+    CONF_NIGHT_END_HOUR,
+    CONF_NIGHT_ON_HOLIDAYS,
+    CONF_NIGHT_ON_WEEKENDS,
+    CONF_NIGHT_START_HOUR,
     CONF_RESOLUTION,
     CONF_VAT_PERCENT,
+    DEFAULT_FEES_EUR_PER_KWH,
+    DEFAULT_GRID_EUR_PER_KWH,
     DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_NIGHT_END_HOUR,
+    DEFAULT_NIGHT_ON_HOLIDAYS,
+    DEFAULT_NIGHT_ON_WEEKENDS,
+    DEFAULT_NIGHT_START_HOUR,
     DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_DAYS_PER_REQUEST,
@@ -39,7 +54,7 @@ from .const import (
     Resolution,
 )
 from .nps import EleringNpsClient, NpsError
-from .pricing import make_tariff
+from .pricing import GridTariff, Tariff, make_tariff
 from .statistics import (
     CostStream,
     StatisticStream,
@@ -190,11 +205,42 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
             ),
         ]
 
-    def _build_tariff(self) -> Callable[[float], float]:
-        """Construct the curried tariff function from current options."""
-        vat = float(self.options.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT))
-        margin = float(self.options.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH))
-        return make_tariff(vat, margin)
+    def _build_tariff(self) -> Tariff:
+        """Construct the tariff function from current options.
+
+        Grid day/night hours follow HA's configured time zone, public holidays
+        HA's configured country (none configured -> no holidays).
+        """
+        opts = self.options
+        vat = float(opts.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT))
+        margin = float(opts.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH))
+        fees = float(opts.get(CONF_FEES_EUR_PER_KWH, DEFAULT_FEES_EUR_PER_KWH))
+        grid = GridTariff(
+            day_eur_per_kwh=float(opts.get(CONF_GRID_DAY_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH)),
+            night_eur_per_kwh=float(
+                opts.get(CONF_GRID_NIGHT_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH)
+            ),
+            night_start_hour=int(opts.get(CONF_NIGHT_START_HOUR, DEFAULT_NIGHT_START_HOUR)),
+            night_end_hour=int(opts.get(CONF_NIGHT_END_HOUR, DEFAULT_NIGHT_END_HOUR)),
+            night_on_weekends=bool(opts.get(CONF_NIGHT_ON_WEEKENDS, DEFAULT_NIGHT_ON_WEEKENDS)),
+            night_on_holidays=bool(opts.get(CONF_NIGHT_ON_HOLIDAYS, DEFAULT_NIGHT_ON_HOLIDAYS)),
+            tz=dt_util.get_default_time_zone(),
+            holidays=self._public_holidays(),
+        )
+        return make_tariff(vat, margin, fees_eur_per_kwh=fees, grid=grid)
+
+    def _public_holidays(self) -> Container[date]:
+        """Public holidays for HA's configured country; empty when unset or unsupported."""
+        country = self.hass.config.country
+        if not country:
+            return frozenset()
+        try:
+            return holidays.country_holidays(country)
+        except NotImplementedError:
+            _LOGGER.warning(
+                "No public-holiday calendar for country %s; holidays billed as weekdays", country
+            )
+            return frozenset()
 
     def streams_for(self, meter: MeteringPoint) -> list[StatisticStream]:
         suffix = eic_suffix(meter.eic)

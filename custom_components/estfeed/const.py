@@ -21,8 +21,33 @@ MIN_BACKFILL_MONTHS: Final = 1
 
 CONF_VAT_PERCENT: Final = "vat_percent"
 CONF_MARGIN_EUR_PER_KWH: Final = "margin_eur_per_kwh"
+CONF_FEES_EUR_PER_KWH: Final = "fees_eur_per_kwh"
+CONF_GRID_DAY_EUR_PER_KWH: Final = "grid_day_eur_per_kwh"
+CONF_GRID_NIGHT_EUR_PER_KWH: Final = "grid_night_eur_per_kwh"
+CONF_NIGHT_START_HOUR: Final = "night_start_hour"
+CONF_NIGHT_END_HOUR: Final = "night_end_hour"
+CONF_NIGHT_ON_WEEKENDS: Final = "night_on_weekends"
+CONF_NIGHT_ON_HOLIDAYS: Final = "night_on_holidays"
 DEFAULT_VAT_PERCENT: Final = 22.0
 DEFAULT_MARGIN_EUR_PER_KWH: Final = 0.0
+DEFAULT_FEES_EUR_PER_KWH: Final = 0.0
+DEFAULT_GRID_EUR_PER_KWH: Final = 0.0
+DEFAULT_NIGHT_START_HOUR: Final = 22
+DEFAULT_NIGHT_END_HOUR: Final = 7
+DEFAULT_NIGHT_ON_WEEKENDS: Final = True
+DEFAULT_NIGHT_ON_HOLIDAYS: Final = True
+# Options that feed the tariff; changing any of them triggers a cost rebuild.
+TARIFF_OPTION_KEYS: Final = (
+    CONF_VAT_PERCENT,
+    CONF_MARGIN_EUR_PER_KWH,
+    CONF_FEES_EUR_PER_KWH,
+    CONF_GRID_DAY_EUR_PER_KWH,
+    CONF_GRID_NIGHT_EUR_PER_KWH,
+    CONF_NIGHT_START_HOUR,
+    CONF_NIGHT_END_HOUR,
+    CONF_NIGHT_ON_WEEKENDS,
+    CONF_NIGHT_ON_HOLIDAYS,
+)
 
 UPDATE_INTERVAL: Final = timedelta(hours=1)
 ROLLING_CACHE_DAYS: Final = 62

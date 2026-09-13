@@ -7,7 +7,7 @@ name = "ha-estfeed"
 version = "0.1.0"
 description = "Home Assistant integration for Elering Estfeed metering data"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["holidays>=0.50"]
 
 [project.optional-dependencies]
 dev = [

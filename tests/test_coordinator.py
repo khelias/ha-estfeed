@@ -15,6 +15,9 @@ from custom_components.estfeed.api import (
 )
 from custom_components.estfeed.const import (
     CONF_BACKFILL_MONTHS,
+    CONF_FEES_EUR_PER_KWH,
+    CONF_GRID_DAY_EUR_PER_KWH,
+    CONF_GRID_NIGHT_EUR_PER_KWH,
     CONF_MARGIN_EUR_PER_KWH,
     CONF_RESOLUTION,
     CONF_VAT_PERCENT,
@@ -1105,15 +1108,71 @@ def test_build_tariff_applies_configured_vat_and_margin(hass):
         options={CONF_VAT_PERCENT: 22.0, CONF_MARGIN_EUR_PER_KWH: 0.01},
     )
     tariff = coord._build_tariff()
-    # 0.05 * 1.22 + 0.01 = 0.071
-    assert tariff(0.05) == pytest.approx(0.071)
+    # 0.05 * 1.22 + 0.01 = 0.071 (no grid fee configured, so the hour is irrelevant)
+    assert tariff(0.05, datetime(2026, 5, 20, 10, tzinfo=UTC)) == pytest.approx(0.071)
 
 
 def test_build_tariff_uses_defaults_when_options_missing(hass):
     coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
     tariff = coord._build_tariff()
     # Default VAT=22.0, margin=0.0 -> 0.05 * 1.22 = 0.061
-    assert tariff(0.05) == pytest.approx(0.061)
+    assert tariff(0.05, datetime(2026, 5, 20, 10, tzinfo=UTC)) == pytest.approx(0.061)
+
+
+async def test_build_tariff_applies_grid_day_night_in_ha_time_zone(hass):
+    await hass.config.async_set_time_zone("Europe/Tallinn")
+    coord = EstfeedCoordinator(
+        hass=hass,
+        client=MagicMock(),
+        slug="home",
+        options={
+            CONF_VAT_PERCENT: 24.0,
+            CONF_MARGIN_EUR_PER_KWH: 0.0047,
+            CONF_FEES_EUR_PER_KWH: 0.0219,
+            CONF_GRID_DAY_EUR_PER_KWH: 0.0369,
+            CONF_GRID_NIGHT_EUR_PER_KWH: 0.021,
+        },
+    )
+    tariff = coord._build_tariff()
+    # Wed 2026-05-20 09:00 UTC = 12:00 Tallinn (EEST) -> day rate
+    day = tariff(0.05, datetime(2026, 5, 20, 9, tzinfo=UTC))
+    assert day == pytest.approx((0.05 + 0.0369 + 0.0219) * 1.24 + 0.0047)
+    # Wed 2026-05-20 20:00 UTC = 23:00 Tallinn -> night rate
+    night = tariff(0.05, datetime(2026, 5, 20, 20, tzinfo=UTC))
+    assert night == pytest.approx((0.05 + 0.021 + 0.0219) * 1.24 + 0.0047)
+    # 03:59 UTC is still 06:59 local (night); 04:00 UTC is 07:00 local (day)
+    assert tariff(0.05, datetime(2026, 5, 20, 3, tzinfo=UTC)) == pytest.approx(night)
+    assert tariff(0.05, datetime(2026, 5, 20, 4, tzinfo=UTC)) == pytest.approx(day)
+
+
+async def test_build_tariff_uses_public_holidays_of_ha_country(hass):
+    await hass.config.async_set_time_zone("Europe/Tallinn")
+    hass.config.country = "EE"
+    coord = EstfeedCoordinator(
+        hass=hass,
+        client=MagicMock(),
+        slug="home",
+        options={CONF_GRID_DAY_EUR_PER_KWH: 0.04, CONF_GRID_NIGHT_EUR_PER_KWH: 0.02},
+    )
+    tariff = coord._build_tariff()
+    # Thu 2026-08-20 is Estonia's Day of Restoration of Independence: night rate at noon.
+    holiday_noon = tariff(0.0, datetime(2026, 8, 20, 9, tzinfo=UTC))
+    workday_noon = tariff(0.0, datetime(2026, 8, 19, 9, tzinfo=UTC))
+    assert holiday_noon == pytest.approx(0.02 * 1.22)
+    assert workday_noon == pytest.approx(0.04 * 1.22)
+
+
+def test_build_tariff_without_country_has_no_holidays(hass):
+    hass.config.country = None
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    assert datetime(2026, 8, 20).date() not in coord._public_holidays()
+
+
+def test_build_tariff_unknown_country_falls_back_to_no_holidays(hass, caplog):
+    hass.config.country = "XX"
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    assert datetime(2026, 12, 25).date() not in coord._public_holidays()
+    assert "No public-holiday calendar" in caplog.text
 
 
 def test_last_nps_error_starts_none(hass):

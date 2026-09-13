@@ -260,8 +260,8 @@ def test_compute_statistic_rows_snaps_to_top_of_hour():
         assert s.minute == 0 and s.second == 0 and s.microsecond == 0
 
 
-def _flat_tariff() -> Callable[[float], float]:
-    return lambda spot: spot  # identity → easy arithmetic in tests
+def _flat_tariff() -> Callable[[float, datetime], float]:
+    return lambda spot, _hour: spot  # identity → easy arithmetic in tests
 
 
 @pytest.mark.asyncio

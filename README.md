@@ -39,7 +39,17 @@ For electricity meters, the integration also publishes two derived external stat
 - `estfeed:<your_name>_cost_<eic_suffix>` — cumulative cost of consumed energy
 - `estfeed:<your_name>_compensation_<eic_suffix>` — cumulative compensation for produced energy
 
-Both are computed by multiplying each hour's consumption/production by the matching Nord Pool spot price for the EE bidding zone (fetched from the Elering NPS API), then applying a configurable tariff: `spot × (1 + VAT%/100) + margin`. Defaults: VAT 22 %, margin 0 €/kWh — adjust in the integration options.
+Both are computed by multiplying each hour's consumption/production by the matching Nord Pool spot price for the EE bidding zone (fetched from the Elering NPS API), then applying a configurable tariff that mirrors an Estonian electricity invoice:
+
+```
+(spot + grid transfer + fees) × (1 + VAT%/100) + margin
+```
+
+- **Grid transfer** is time-of-use: a day rate and a night rate (EUR/kWh excl. VAT). Night runs from `night_start_hour` to `night_end_hour` in HA's time zone (default 22-07), and optionally covers whole weekends and public holidays (default on; holidays come from HA's configured country via the `holidays` package).
+- **Fees** are the fixed per-kWh items quoted excl. VAT (renewable energy levy, security of supply, excise, balancing).
+- **Margin** is the supplier's per-kWh margin, quoted incl. VAT, so it lands after the VAT multiplication. Can be negative.
+
+Defaults: VAT 22 %, everything else 0, which reduces to the previous `spot × VAT + margin` behaviour. Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Adjust in the integration options.
 
 To wire them into the Energy dashboard:
 
@@ -71,7 +81,6 @@ For each metering point:
 ## Limitations
 
 - Not real-time: hours need to settle before their kWh value is final (see the note at the top).
-- Cost calculation is intentionally not included; use HA's built-in Energy Dashboard cost configuration with a price entity.
 - API rate limit: 1 request per 5 seconds (per API key) — handled internally.
 
 ## Development

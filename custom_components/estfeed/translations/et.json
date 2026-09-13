@@ -34,7 +34,14 @@
           "resolution": "Andmete täpsus",
           "backfill_months": "Ajalooliste andmete aken (kuud)",
           "vat_percent": "Käibemaks (%)",
-          "margin_eur_per_kwh": "Marginaal (EUR/kWh, võib olla negatiivne)"
+          "margin_eur_per_kwh": "Müüja marginaal (EUR/kWh koos KM-iga, võib olla negatiivne)",
+          "fees_eur_per_kwh": "Fikseeritud tasud kWh kohta ilma KM-ita (taastuvenergia tasu, aktsiis, ...)",
+          "grid_day_eur_per_kwh": "Võrgutasu päeval (EUR/kWh ilma KM-ita)",
+          "grid_night_eur_per_kwh": "Võrgutasu öösel (EUR/kWh ilma KM-ita)",
+          "night_start_hour": "Öötariif algab (tund, kohalik aeg)",
+          "night_end_hour": "Öötariif lõpeb (tund, kohalik aeg)",
+          "night_on_weekends": "Öötariif kogu nädalavahetusel",
+          "night_on_holidays": "Öötariif riigipühadel"
         }
       }
     }

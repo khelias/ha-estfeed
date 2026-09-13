@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from custom_components.estfeed.api import AccountingInterval
 from custom_components.estfeed.const import Kind
 from custom_components.estfeed.pricing import (
+    GridTariff,
     apply_tariff,
     compute_cost_rows,
     compute_cost_rows_from_hourly,
     make_tariff,
 )
+
+HOUR = datetime(2026, 5, 21, 10, tzinfo=UTC)  # Thu, a plain weekday hour
+TALLINN = ZoneInfo("Europe/Tallinn")
 
 
 def _interval(
@@ -66,13 +71,13 @@ def test_apply_tariff_negative_spot():
 def test_make_tariff_returns_callable():
     tariff = make_tariff(vat_percent=22.0, margin_eur_per_kwh=0.007)
     assert callable(tariff)
-    assert tariff(0.05) == pytest.approx(0.068)
+    assert tariff(0.05, HOUR) == pytest.approx(0.068)
 
 
 def test_make_tariff_captures_arguments():
     tariff_22 = make_tariff(22.0, 0.0)
     tariff_24 = make_tariff(24.0, 0.0)
-    assert tariff_22(0.05) != tariff_24(0.05)
+    assert tariff_22(0.05, HOUR) != tariff_24(0.05, HOUR)
 
 
 def test_compute_cost_rows_single_hour():
@@ -237,3 +242,81 @@ def test_compute_cost_rows_delegates_to_hourly_builder():
         prior_sum=0.0,
     )
     assert via_intervals == via_hourly
+
+
+def test_apply_tariff_grid_and_fees_are_taxed_with_spot():
+    # (0.05 + 0.0369 + 0.0219) * 1.24 + 0.0047: an Estonian invoice stack
+    assert apply_tariff(
+        0.05,
+        vat_percent=24.0,
+        margin_eur_per_kwh=0.0047,
+        grid_eur_per_kwh=0.0369,
+        fees_eur_per_kwh=0.0219,
+    ) == pytest.approx(0.1088 * 1.24 + 0.0047)
+
+
+def _grid(**kw) -> GridTariff:
+    base = {"day_eur_per_kwh": 0.04, "night_eur_per_kwh": 0.02, "tz": TALLINN}
+    return GridTariff(**{**base, **kw})
+
+
+def test_grid_tariff_weekday_day_and_night_window_wraps_midnight():
+    grid = _grid(night_on_weekends=False, night_on_holidays=False)
+    # Thu 2026-05-21, Tallinn is UTC+3 in May: 09 UTC = 12 local, 20 UTC = 23 local
+    assert grid.rate(datetime(2026, 5, 21, 9, tzinfo=UTC)) == 0.04
+    assert grid.rate(datetime(2026, 5, 21, 20, tzinfo=UTC)) == 0.02
+    # boundaries: 06:59 local is night, 07:00 local is day, 22:00 local is night
+    assert grid.is_night(datetime(2026, 5, 21, 3, tzinfo=UTC))
+    assert not grid.is_night(datetime(2026, 5, 21, 4, tzinfo=UTC))
+    assert grid.is_night(datetime(2026, 5, 21, 19, tzinfo=UTC))
+
+
+def test_grid_tariff_night_window_without_wrap():
+    grid = _grid(night_start_hour=0, night_end_hour=6, night_on_weekends=False)
+    assert grid.is_night(datetime(2026, 5, 20, 22, tzinfo=UTC))  # 01:00 local Thu
+    assert not grid.is_night(datetime(2026, 5, 21, 3, tzinfo=UTC))  # 06:00 local
+
+
+def test_grid_tariff_equal_start_and_end_means_no_night_window():
+    grid = _grid(night_start_hour=7, night_end_hour=7, night_on_weekends=False)
+    assert not grid.is_night(datetime(2026, 5, 21, 0, tzinfo=UTC))
+
+
+def test_grid_tariff_weekends_and_holidays():
+    holiday = date(2026, 8, 20)  # Thu, Estonian public holiday
+    grid = _grid(holidays={holiday})
+    assert grid.is_night(datetime(2026, 5, 23, 9, tzinfo=UTC))  # Sat noon
+    assert grid.is_night(datetime(2026, 8, 20, 9, tzinfo=UTC))  # holiday noon
+    assert not grid.is_night(datetime(2026, 8, 19, 9, tzinfo=UTC))  # Wed noon
+    off = _grid(night_on_weekends=False, night_on_holidays=False, holidays={holiday})
+    assert not off.is_night(datetime(2026, 5, 23, 9, tzinfo=UTC))
+    assert not off.is_night(datetime(2026, 8, 20, 9, tzinfo=UTC))
+
+
+def test_grid_tariff_defaults_are_neutral():
+    # No rates configured: the grid fee is zero whatever the hour, so the
+    # tariff reduces to the pre-0.3 spot x VAT + margin.
+    assert GridTariff().rate(datetime(2026, 5, 23, 9, tzinfo=UTC)) == 0.0
+    tariff = make_tariff(22.0, 0.01)
+    assert tariff(0.05, datetime(2026, 5, 23, 9, tzinfo=UTC)) == pytest.approx(0.071)
+
+
+def test_make_tariff_picks_rate_per_hour():
+    tariff = make_tariff(24.0, 0.0, fees_eur_per_kwh=0.01, grid=_grid(night_on_weekends=False))
+    day = tariff(0.05, datetime(2026, 5, 21, 9, tzinfo=UTC))
+    night = tariff(0.05, datetime(2026, 5, 21, 20, tzinfo=UTC))
+    assert day == pytest.approx((0.05 + 0.04 + 0.01) * 1.24)
+    assert night == pytest.approx((0.05 + 0.02 + 0.01) * 1.24)
+
+
+def test_compute_cost_rows_from_hourly_passes_hour_to_tariff():
+    seen: list[datetime] = []
+
+    def tariff(spot: float, hour: datetime) -> float:
+        seen.append(hour)
+        return spot
+
+    hourly = {datetime(2026, 5, 21, h, tzinfo=UTC): 1.0 for h in (10, 11)}
+    prices = {datetime(2026, 5, 21, h, tzinfo=UTC): 0.05 for h in (10, 11)}
+    compute_cost_rows_from_hourly(hourly, prices, tariff, prior_sum=0.0)
+    assert seen == sorted(hourly)

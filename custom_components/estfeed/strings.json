@@ -32,7 +32,16 @@
         "title": "Estfeed options",
         "data": {
           "resolution": "Data resolution",
-          "backfill_months": "Backfill window (months)"
+          "backfill_months": "Backfill window (months)",
+          "vat_percent": "VAT percentage (%)",
+          "margin_eur_per_kwh": "Supplier margin (EUR/kWh incl. VAT, can be negative)",
+          "fees_eur_per_kwh": "Fixed per-kWh fees excl. VAT (renewable levy, excise, ...)",
+          "grid_day_eur_per_kwh": "Grid transfer, day rate (EUR/kWh excl. VAT)",
+          "grid_night_eur_per_kwh": "Grid transfer, night rate (EUR/kWh excl. VAT)",
+          "night_start_hour": "Night rate starts at (hour, local time)",
+          "night_end_hour": "Night rate ends at (hour, local time)",
+          "night_on_weekends": "Night rate all weekend",
+          "night_on_holidays": "Night rate on public holidays"
         }
       }
     }

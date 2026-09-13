@@ -20,13 +20,26 @@ from .const import (
     CONF_BACKFILL_MONTHS,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
+    CONF_FEES_EUR_PER_KWH,
     CONF_FRIENDLY_NAME,
+    CONF_GRID_DAY_EUR_PER_KWH,
+    CONF_GRID_NIGHT_EUR_PER_KWH,
     CONF_MARGIN_EUR_PER_KWH,
+    CONF_NIGHT_END_HOUR,
+    CONF_NIGHT_ON_HOLIDAYS,
+    CONF_NIGHT_ON_WEEKENDS,
+    CONF_NIGHT_START_HOUR,
     CONF_RESOLUTION,
     CONF_VAT_PERCENT,
     DEFAULT_BACKFILL_MONTHS,
+    DEFAULT_FEES_EUR_PER_KWH,
     DEFAULT_FRIENDLY_NAME,
+    DEFAULT_GRID_EUR_PER_KWH,
     DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_NIGHT_END_HOUR,
+    DEFAULT_NIGHT_ON_HOLIDAYS,
+    DEFAULT_NIGHT_ON_WEEKENDS,
+    DEFAULT_NIGHT_START_HOUR,
     DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_BACKFILL_MONTHS,
@@ -143,6 +156,34 @@ class EstfeedOptionsFlow(OptionsFlow):
                     CONF_MARGIN_EUR_PER_KWH,
                     default=current.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH),
                 ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
+                vol.Required(
+                    CONF_FEES_EUR_PER_KWH,
+                    default=current.get(CONF_FEES_EUR_PER_KWH, DEFAULT_FEES_EUR_PER_KWH),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required(
+                    CONF_GRID_DAY_EUR_PER_KWH,
+                    default=current.get(CONF_GRID_DAY_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required(
+                    CONF_GRID_NIGHT_EUR_PER_KWH,
+                    default=current.get(CONF_GRID_NIGHT_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Required(
+                    CONF_NIGHT_START_HOUR,
+                    default=current.get(CONF_NIGHT_START_HOUR, DEFAULT_NIGHT_START_HOUR),
+                ): vol.All(int, vol.Range(min=0, max=23)),
+                vol.Required(
+                    CONF_NIGHT_END_HOUR,
+                    default=current.get(CONF_NIGHT_END_HOUR, DEFAULT_NIGHT_END_HOUR),
+                ): vol.All(int, vol.Range(min=0, max=23)),
+                vol.Required(
+                    CONF_NIGHT_ON_WEEKENDS,
+                    default=current.get(CONF_NIGHT_ON_WEEKENDS, DEFAULT_NIGHT_ON_WEEKENDS),
+                ): bool,
+                vol.Required(
+                    CONF_NIGHT_ON_HOLIDAYS,
+                    default=current.get(CONF_NIGHT_ON_HOLIDAYS, DEFAULT_NIGHT_ON_HOLIDAYS),
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
