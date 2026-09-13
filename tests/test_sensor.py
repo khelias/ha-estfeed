@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -14,6 +14,7 @@ from custom_components.estfeed.api import AccountingInterval, MeteringPoint, Per
 from custom_components.estfeed.const import CommodityType, Kind
 from custom_components.estfeed.coordinator import CumulativeBaseline
 from custom_components.estfeed.sensor import (
+    CostSensor,
     CumulativeSinceResetSensor,
     LaggingPeriod,
     LaggingSensor,
@@ -233,3 +234,47 @@ def test_latest_interval_sensor_returns_max_period_start():
 
     sensor = LatestIntervalSensor(coordinator=coordinator, meter=_meter())
     assert sensor.native_value == datetime(2026, 4, 28, 2, tzinfo=UTC)
+
+
+def _cost_coordinator(result):
+    coordinator = MagicMock()
+    coordinator.hass.config.time_zone = "Europe/Tallinn"
+    coordinator.hass.config.currency = "EUR"
+    coordinator.slug = "home"
+    coordinator.last_update_success = True
+    coordinator.cost_for_window.return_value = result
+    return coordinator
+
+
+def test_cost_sensor_reports_window_cost_and_missing_hours():
+    coordinator = _cost_coordinator((3.20456, 2))
+    sensor = CostSensor(coordinator, _meter(), Kind.CONSUMPTION, LaggingPeriod.YESTERDAY)
+
+    assert sensor.unique_id == "estfeed_home_cost_yesterday_089n"
+    assert sensor.translation_key == "cost_yesterday"
+    assert sensor.device_class == SensorDeviceClass.MONETARY
+    assert sensor.native_unit_of_measurement == "EUR"
+    assert sensor.available is True
+    assert sensor.native_value == pytest.approx(3.2046)
+    attrs = sensor.extra_state_attributes
+    assert attrs["hours_without_price"] == 2
+    # yesterday's window is passed to the coordinator in UTC
+    args = coordinator.cost_for_window.call_args.args
+    assert args[0] == "38ZEE-00720089-N" and args[1] == Kind.CONSUMPTION
+    assert args[3] - args[2] == timedelta(days=1)
+    assert args[2].tzinfo == UTC
+
+
+def test_cost_sensor_unavailable_without_prices_or_cache():
+    coordinator = _cost_coordinator(None)
+    sensor = CostSensor(coordinator, _meter(), Kind.CONSUMPTION, LaggingPeriod.TODAY)
+    assert sensor.available is False
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes["hours_without_price"] == 0
+
+
+def test_compensation_sensor_is_disabled_by_default():
+    coordinator = _cost_coordinator((0.0, 0))
+    sensor = CostSensor(coordinator, _meter(), Kind.PRODUCTION, LaggingPeriod.MONTH_TO_DATE)
+    assert sensor.unique_id == "estfeed_home_compensation_month_to_date_089n"
+    assert sensor.entity_registry_enabled_default is False

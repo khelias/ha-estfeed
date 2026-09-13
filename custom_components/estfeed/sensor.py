@@ -159,6 +159,66 @@ class LaggingSensor(_EstfeedEntity, SensorEntity):
         }
 
 
+class CostSensor(_EstfeedEntity, SensorEntity):
+    """Cost of consumption (or compensation for production) over a lagging period.
+
+    Prices the coordinator's cached intervals with the same tariff and NPS
+    prices that produce the cost statistics, so the number matches what the
+    Energy dashboard shows for the same window. Hours whose price is not
+    cached yet are left out and counted in ``hours_without_price``.
+    """
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 2
+
+    def __init__(
+        self,
+        coordinator: EstfeedCoordinator,
+        meter: MeteringPoint,
+        kind: Kind,
+        period: LaggingPeriod,
+    ) -> None:
+        super().__init__(coordinator, meter)
+        self._kind = kind
+        self._period = period
+        label = "cost" if kind == Kind.CONSUMPTION else "compensation"
+        suffix = eic_suffix(meter.eic)
+        self._attr_unique_id = f"{DOMAIN}_{coordinator.slug}_{label}_{period.value}_{suffix}"
+        self._attr_translation_key = f"{label}_{period.value}"
+        self._attr_native_unit_of_measurement = coordinator.hass.config.currency or "EUR"
+        if kind == Kind.PRODUCTION:
+            self._attr_entity_registry_enabled_default = False
+
+    def _window(self) -> tuple[datetime, datetime]:
+        tz = ZoneInfo(self.coordinator.hass.config.time_zone or "UTC")
+        start, end = window_for_period(self._period, now=datetime.now(tz=UTC), tz=tz)
+        return start.astimezone(UTC), end.astimezone(UTC)
+
+    def _compute(self) -> tuple[float, int] | None:
+        start, end = self._window()
+        return self.coordinator.cost_for_window(self._meter.eic, self._kind, start, end)
+
+    @property
+    def available(self) -> bool:
+        return self._compute() is not None
+
+    @property
+    def native_value(self) -> float | None:
+        result = self._compute()
+        return None if result is None else round(result[0], 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | int]:
+        start, end = self._window()
+        result = self._compute()
+        return {
+            "meter_eic": self._meter.eic,
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            "hours_without_price": result[1] if result is not None else 0,
+        }
+
+
 class CumulativeSinceResetSensor(_EstfeedEntity, SensorEntity):
     """Total consumption/production since the last reset.
 
@@ -259,6 +319,8 @@ async def async_setup_entry(
         for kind in (Kind.CONSUMPTION, Kind.PRODUCTION):
             for period in LaggingPeriod:
                 entities.append(LaggingSensor(coordinator, meter, kind, period, multi_meter))
+                if meter.commodity_type == CommodityType.ELECTRICITY:
+                    entities.append(CostSensor(coordinator, meter, kind, period))
             entities.append(CumulativeSinceResetSensor(coordinator, meter, kind))
         entities.append(LatestIntervalSensor(coordinator, meter))
     async_add_entities(entities)

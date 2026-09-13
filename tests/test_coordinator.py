@@ -26,6 +26,7 @@ from custom_components.estfeed.const import (
     Resolution,
 )
 from custom_components.estfeed.coordinator import CumulativeBaseline, EstfeedCoordinator
+from custom_components.estfeed.nps import EleringNpsClient, NpsError
 from custom_components.estfeed.statistics import CostStream
 
 
@@ -1370,3 +1371,63 @@ async def test_async_rebuild_cost_noop_without_nps_client(hass):
     with patch.object(coord, "_hourly_energy_from_stats", new=AsyncMock()) as mock_hourly:
         await coord.async_rebuild_cost()
     mock_hourly.assert_not_called()
+
+
+# ---- cost_for_window and price warm-up ----
+
+
+def test_cost_for_window_prices_cached_intervals_with_tariff(hass):
+    coord = EstfeedCoordinator(
+        hass=hass,
+        client=MagicMock(),
+        slug="home",
+        options={CONF_VAT_PERCENT: 0.0, CONF_MARGIN_EUR_PER_KWH: 0.0},
+    )
+    eic = "38ZEE-00720089-N"
+    hours = [datetime(2026, 5, 20, h, tzinfo=UTC) for h in (10, 11, 12)]
+    coord.cache[(eic, Kind.CONSUMPTION)].extend(
+        AccountingInterval(
+            period_start=h,
+            consumption_kwh=2.0,
+            production_kwh=None,
+            consumption_m3=None,
+            production_m3=None,
+        )
+        for h in hours
+    )
+    nps = EleringNpsClient(MagicMock())
+    nps._cache.update({hours[0]: 0.10, hours[1]: 0.20})  # 12:00 has no price yet
+    coord.attach_nps_client(nps)
+
+    result = coord.cost_for_window(eic, Kind.CONSUMPTION, hours[0], hours[2] + timedelta(hours=1))
+    assert result is not None
+    cost, missing = result
+    assert cost == pytest.approx(2.0 * 0.10 + 2.0 * 0.20)
+    assert missing == 1
+
+
+def test_cost_for_window_none_without_nps_or_cache(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    start = datetime(2026, 5, 20, tzinfo=UTC)
+    assert coord.cost_for_window("38ZEE-00720089-N", Kind.CONSUMPTION, start, start) is None
+    coord.attach_nps_client(EleringNpsClient(MagicMock()))
+    assert coord.cost_for_window("38ZEE-00720089-N", Kind.CONSUMPTION, start, start) is None
+
+
+async def test_warm_prices_walks_window_in_chunks_and_records_errors(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    nps = MagicMock()
+    nps.async_get_prices = AsyncMock(side_effect=[{}, {}, NpsError("boom")])
+    coord.attach_nps_client(nps)
+    start = datetime(2026, 3, 1, tzinfo=UTC)
+    await coord.async_warm_prices(start, start + timedelta(days=70))  # 31 + 31 + 8 days = 3 chunks
+    assert nps.async_get_prices.await_count == 3
+    assert coord.last_nps_error == "boom"
+
+
+async def test_warm_prices_noop_without_nps(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    await coord.async_warm_prices(
+        datetime(2026, 3, 1, tzinfo=UTC), datetime(2026, 3, 2, tzinfo=UTC)
+    )
+    assert coord.last_nps_error is None

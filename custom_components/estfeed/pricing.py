@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Container
+from collections.abc import Callable, Container, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, tzinfo
 from typing import Any
@@ -107,6 +107,39 @@ def _interval_value(interval: AccountingInterval, kind: Kind) -> float | None:
     if interval.production_kwh is not None:
         return interval.production_kwh
     return interval.production_m3
+
+
+def cost_for_window(
+    intervals: Iterable[AccountingInterval],
+    kind: Kind,
+    start_utc: datetime,
+    end_utc: datetime,
+    prices: Mapping[datetime, float],
+    tariff: Tariff,
+) -> tuple[float, int]:
+    """Price the intervals whose hour starts in [start_utc, end_utc).
+
+    Sub-hourly intervals are summed into their hour first (the tariff and the
+    price are hourly). Returns ``(cost, hours_without_price)``: hours with no
+    cached price are skipped and counted so callers can flag an incomplete
+    total instead of silently under-reporting.
+    """
+    hourly: dict[datetime, float] = {}
+    for ival in intervals:
+        value = _interval_value(ival, kind)
+        if value is None:
+            continue
+        hour = ival.period_start.replace(minute=0, second=0, microsecond=0)
+        if start_utc <= hour < end_utc:
+            hourly[hour] = hourly.get(hour, 0.0) + float(value)
+    total, missing = 0.0, 0
+    for hour, kwh in hourly.items():
+        price = prices.get(hour)
+        if price is None:
+            missing += 1
+            continue
+        total += kwh * tariff(price, hour)
+    return total, missing
 
 
 def compute_cost_rows(

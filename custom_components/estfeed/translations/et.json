@@ -58,6 +58,14 @@
       "production_previous_month": { "name": "Eelmise kuu tootmine" },
       "consumption_cumulative": { "name": "Kumulatiivne tarbimine" },
       "production_cumulative": { "name": "Kumulatiivne tootmine" },
+      "cost_today": { "name": "Tänane kulu" },
+      "cost_yesterday": { "name": "Eilne kulu" },
+      "cost_month_to_date": { "name": "Kulu sel kuul" },
+      "cost_previous_month": { "name": "Eelmise kuu kulu" },
+      "compensation_today": { "name": "Tänane hüvitis" },
+      "compensation_yesterday": { "name": "Eilne hüvitis" },
+      "compensation_month_to_date": { "name": "Hüvitis sel kuul" },
+      "compensation_previous_month": { "name": "Eelmise kuu hüvitis" },
       "latest_interval": { "name": "Viimane intervall" }
     },
     "binary_sensor": {

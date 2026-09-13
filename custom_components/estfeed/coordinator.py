@@ -54,7 +54,7 @@ from .const import (
     Resolution,
 )
 from .nps import EleringNpsClient, NpsError
-from .pricing import GridTariff, Tariff, make_tariff
+from .pricing import GridTariff, Tariff, cost_for_window, make_tariff
 from .statistics import (
     CostStream,
     StatisticStream,
@@ -392,9 +392,43 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         end = datetime.now(tz=UTC)
         start = end - timedelta(days=ROLLING_CACHE_DAYS)
         await self._fetch_window(start, end, write_stats=False, force_start=True)
+        await self.async_warm_prices(start, end)
         await self.async_ensure_baselines()
         await self._flush_baselines_if_dirty()
         self.async_update_listeners()
+
+    async def async_warm_prices(self, start: datetime, end: datetime) -> None:
+        """Fill the NPS price cache for [start, end) so the cost sensors can price
+        the cached intervals synchronously. Statistics writes warm it as a side
+        effect; after a restart nothing else would."""
+        if self._nps is None:
+            return
+        cursor = start
+        while cursor < end:
+            chunk_end = min(cursor + timedelta(days=MAX_DAYS_PER_REQUEST), end)
+            try:
+                await self._nps.async_get_prices(cursor, chunk_end)
+                self.last_nps_error = None
+            except NpsError as err:
+                self.last_nps_error = str(err)
+                _LOGGER.warning("NPS fetch failed for %s..%s: %s", cursor, chunk_end, err)
+            cursor = chunk_end
+
+    def cost_for_window(
+        self, eic: str, kind: Kind, start_utc: datetime, end_utc: datetime
+    ) -> tuple[float, int] | None:
+        """Cost (EUR) of the cached intervals of one meter+kind in [start, end).
+
+        Uses the same tariff and cached NPS prices as the cost statistics.
+        Returns ``None`` when no price client is attached or the cache holds
+        nothing for the meter; otherwise ``(cost, hours_without_price)``.
+        """
+        bucket = self.cache.get((eic, kind))
+        if self._nps is None or not bucket:
+            return None
+        return cost_for_window(
+            bucket, kind, start_utc, end_utc, self._nps.cached_prices, self._build_tariff()
+        )
 
     async def _fetch_window(
         self,

@@ -56,6 +56,14 @@
       "production_yesterday": { "name": "Production yesterday" },
       "production_month_to_date": { "name": "Production month-to-date" },
       "production_previous_month": { "name": "Production previous month" },
+      "cost_today": { "name": "Cost today" },
+      "cost_yesterday": { "name": "Cost yesterday" },
+      "cost_month_to_date": { "name": "Cost month-to-date" },
+      "cost_previous_month": { "name": "Cost previous month" },
+      "compensation_today": { "name": "Compensation today" },
+      "compensation_yesterday": { "name": "Compensation yesterday" },
+      "compensation_month_to_date": { "name": "Compensation month-to-date" },
+      "compensation_previous_month": { "name": "Compensation previous month" },
       "latest_interval": { "name": "Latest interval" }
     },
     "binary_sensor": {

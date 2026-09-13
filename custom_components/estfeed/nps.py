@@ -10,7 +10,9 @@ windows hits the network at most once per gap.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 
 import aiohttp
 
@@ -39,6 +41,11 @@ class EleringNpsClient:
     @property
     def cache_size(self) -> int:
         return len(self._cache)
+
+    @property
+    def cached_prices(self) -> Mapping[datetime, float]:
+        """Read-only view of the cache (top-of-hour UTC -> EUR/kWh) for synchronous pricing."""
+        return MappingProxyType(self._cache)
 
     def clear_cache(self) -> None:
         """Drop every cached hour.

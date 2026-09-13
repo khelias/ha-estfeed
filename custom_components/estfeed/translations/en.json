@@ -58,6 +58,14 @@
       "production_previous_month": { "name": "Production previous month" },
       "consumption_cumulative": { "name": "Cumulative consumption" },
       "production_cumulative": { "name": "Cumulative production" },
+      "cost_today": { "name": "Cost today" },
+      "cost_yesterday": { "name": "Cost yesterday" },
+      "cost_month_to_date": { "name": "Cost month-to-date" },
+      "cost_previous_month": { "name": "Cost previous month" },
+      "compensation_today": { "name": "Compensation today" },
+      "compensation_yesterday": { "name": "Compensation yesterday" },
+      "compensation_month_to_date": { "name": "Compensation month-to-date" },
+      "compensation_previous_month": { "name": "Compensation previous month" },
       "latest_interval": { "name": "Latest interval" }
     },
     "binary_sensor": {

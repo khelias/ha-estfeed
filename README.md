@@ -70,6 +70,8 @@ For each metering point:
 - `sensor.<name>_consumption_previous_month` (kWh)
 - `sensor.<name>_consumption_cumulative` (kWh — total since the last reset; baseline is captured at install so the sensor starts at 0 and counts forward)
 - `sensor.<name>_production_today` / `_yesterday` / `_month_to_date` / `_previous_month` / `_cumulative` (kWh, **disabled by default** — enable in entity registry if you generate)
+- `sensor.<name>_cost_today` / `_yesterday` / `_month_to_date` / `_previous_month` (EUR, electricity only — the cached hours priced with the same tariff as the cost statistics; `hours_without_price` attribute counts hours whose spot price is not cached yet)
+- `sensor.<name>_compensation_today` / `_yesterday` / `_month_to_date` / `_previous_month` (EUR, **disabled by default**)
 - `sensor.<name>_latest_interval` (timestamp, diagnostic)
 - `binary_sensor.<name>_data_fresh` (diagnostic — `on` if newest interval is < 30 h old)
 - `button.<name>_consumption_cumulative_reset` (re-captures the current cumulative as the new baseline, so the cumulative sensor returns to 0; the matching production button exists too and is disabled by default)

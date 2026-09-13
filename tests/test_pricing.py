@@ -14,6 +14,7 @@ from custom_components.estfeed.pricing import (
     apply_tariff,
     compute_cost_rows,
     compute_cost_rows_from_hourly,
+    cost_for_window,
     make_tariff,
 )
 
@@ -320,3 +321,72 @@ def test_compute_cost_rows_from_hourly_passes_hour_to_tariff():
     prices = {datetime(2026, 5, 21, h, tzinfo=UTC): 0.05 for h in (10, 11)}
     compute_cost_rows_from_hourly(hourly, prices, tariff, prior_sum=0.0)
     assert seen == sorted(hourly)
+
+
+def test_cost_for_window_prices_only_hours_inside_window():
+    intervals = [_interval(h, consumption=2.0) for h in (9, 10, 11, 12)]
+    prices = {datetime(2026, 5, 21, h, tzinfo=UTC): 0.05 for h in (9, 10, 11, 12)}
+    tariff = make_tariff(0.0, 0.0)
+    total, missing = cost_for_window(
+        intervals,
+        Kind.CONSUMPTION,
+        datetime(2026, 5, 21, 10, tzinfo=UTC),
+        datetime(2026, 5, 21, 12, tzinfo=UTC),
+        prices,
+        tariff,
+    )
+    # hours 10 and 11 only: 2 * 2.0 kWh * 0.05
+    assert total == pytest.approx(0.20)
+    assert missing == 0
+
+
+def test_cost_for_window_sums_quarters_and_counts_missing_prices():
+    intervals = [
+        _interval(10, 0, consumption=0.5),
+        _interval(10, 15, consumption=0.5),
+        _interval(11, 0, consumption=1.0),  # no price for 11:00
+        _interval(12, 0, consumption=None),  # unsettled, ignored
+    ]
+    prices = {datetime(2026, 5, 21, 10, tzinfo=UTC): 0.10}
+    tariff = make_tariff(24.0, 0.01)
+    total, missing = cost_for_window(
+        intervals,
+        Kind.CONSUMPTION,
+        datetime(2026, 5, 21, 0, tzinfo=UTC),
+        datetime(2026, 5, 22, 0, tzinfo=UTC),
+        prices,
+        tariff,
+    )
+    assert total == pytest.approx(1.0 * (0.10 * 1.24 + 0.01))
+    assert missing == 1
+
+
+def test_cost_for_window_uses_hourly_tariff():
+    grid = _grid(night_on_weekends=False)
+    tariff = make_tariff(0.0, 0.0, grid=grid)
+    # 09 UTC = 12 local (day, 0.04), 20 UTC = 23 local (night, 0.02); spot 0 isolates the grid fee
+    intervals = [_interval(9, consumption=1.0), _interval(20, consumption=1.0)]
+    prices = {datetime(2026, 5, 21, h, tzinfo=UTC): 0.0 for h in (9, 20)}
+    total, _ = cost_for_window(
+        intervals,
+        Kind.CONSUMPTION,
+        datetime(2026, 5, 21, 0, tzinfo=UTC),
+        datetime(2026, 5, 22, 0, tzinfo=UTC),
+        prices,
+        tariff,
+    )
+    assert total == pytest.approx(0.06)
+
+
+def test_cost_for_window_production_kind_empty_when_no_production():
+    intervals = [_interval(10, consumption=1.0)]
+    prices = {datetime(2026, 5, 21, 10, tzinfo=UTC): 0.05}
+    total, missing = cost_for_window(
+        intervals,
+        Kind.PRODUCTION,
+        datetime(2026, 5, 21, 0, tzinfo=UTC),
+        datetime(2026, 5, 22, 0, tzinfo=UTC),
+        prices,
+        make_tariff(0.0, 0.0),
+    )
+    assert (total, missing) == (0.0, 0)
