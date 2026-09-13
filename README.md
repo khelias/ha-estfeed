@@ -51,6 +51,10 @@ Both are computed by multiplying each hour's consumption/production by the match
 
 Defaults: VAT 22 %, everything else 0, which reduces to the previous `spot × VAT + margin` behaviour. Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Adjust in the integration options.
 
+### Hourly price statistic
+
+Electricity entries also publish `estfeed:<your_name>_price` (unit `<currency>/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, so price history is available from the first install rather than from whenever a price sensor started being recorded. It is written incrementally on every hourly tick, over the whole cached window after a restart or backfill, and rewritten when the tariff options change. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.
+
 To wire them into the Energy dashboard:
 
 1. Open Settings → Dashboards → Energy → "Grid consumption" for the existing `estfeed:<your_name>_consumption_<eic_suffix>` row.

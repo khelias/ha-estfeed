@@ -1459,3 +1459,69 @@ async def test_warm_prices_noop_without_nps(hass):
         datetime(2026, 3, 1, tzinfo=UTC), datetime(2026, 3, 2, tzinfo=UTC)
     )
     assert coord.last_nps_error is None
+
+
+def test_publish_price_statistics_is_incremental_between_ticks(hass):
+    """Warm-up writes every cached hour up to now; a tick only re-sends from the
+    last published hour, and known day-ahead hours are never written."""
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    coord.meters = [_make_meter()]
+    now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+    cache = {
+        now_hour - timedelta(hours=2): 0.05,
+        now_hour - timedelta(hours=1): 0.05,
+        now_hour: 0.05,
+        now_hour + timedelta(hours=3): 0.05,
+    }
+    mock_nps = MagicMock()
+    type(mock_nps).cached_prices = property(lambda _self: dict(cache))
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_price_statistics", new=MagicMock()
+    ) as mock_write:
+        coord._publish_price_statistics(full=True)
+        stream, rows = mock_write.call_args.args[1], mock_write.call_args.args[2]
+        assert stream.statistic_id == "estfeed:home_price"
+        assert stream.unit.endswith("/kWh")
+        assert [r["start"] for r in rows] == [
+            now_hour - timedelta(hours=2),
+            now_hour - timedelta(hours=1),
+            now_hour,
+        ]
+        # Default tariff: 22 % VAT, no margin/grid/fees.
+        assert rows[0]["mean"] == pytest.approx(0.061)
+
+        cache[now_hour + timedelta(hours=1)] = 0.07  # still in the future: ignored
+        coord._publish_price_statistics()
+        rows = mock_write.call_args.args[2]
+        assert [r["start"] for r in rows] == [now_hour]
+    assert mock_write.call_count == 2
+
+
+def test_publish_price_statistics_skips_gas_only_entries(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    coord.meters = [_gas_meter()]
+    mock_nps = MagicMock()
+    type(mock_nps).cached_prices = property(
+        lambda _self: {datetime(2026, 9, 13, 10, tzinfo=UTC): 0.05}
+    )
+    coord.attach_nps_client(mock_nps)
+    with patch(
+        "custom_components.estfeed.coordinator.async_write_price_statistics", new=MagicMock()
+    ) as mock_write:
+        coord._publish_price_statistics(full=True)
+    mock_write.assert_not_called()
+
+
+async def test_warm_cache_publishes_full_price_history(hass):
+    coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
+    coord.meters = [_make_meter()]
+    with (
+        patch.object(coord, "_fetch_window", new=AsyncMock()),
+        patch.object(coord, "async_warm_prices", new=AsyncMock()),
+        patch.object(coord, "async_ensure_baselines", new=AsyncMock()),
+        patch.object(coord, "_flush_baselines_if_dirty", new=AsyncMock()),
+        patch.object(coord, "_publish_price_statistics") as mock_publish,
+    ):
+        await coord.async_warm_cache()
+    mock_publish.assert_called_once_with(full=True)

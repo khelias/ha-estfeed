@@ -57,11 +57,14 @@ from .nps import EleringNpsClient, NpsError
 from .pricing import GridTariff, Tariff, cost_for_window, make_tariff
 from .statistics import (
     CostStream,
+    PriceStream,
     StatisticStream,
     async_write_cost_statistics,
     async_write_cost_statistics_from_hourly,
     async_write_meter_statistics,
+    async_write_price_statistics,
     build_statistic_id,
+    compute_price_rows,
     eic_suffix,
 )
 
@@ -151,6 +154,8 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # as the default lazy client; production wiring overrides it via
         # ``attach_nps_client`` before any fetch happens.
         self._nps: EleringNpsClient | None = None
+        # Last hour written to the price statistic; ticks publish from here.
+        self._price_published_until: datetime | None = None
         self.last_nps_error: str | None = None
 
     def attach_nps_client(self, nps: EleringNpsClient) -> None:
@@ -204,6 +209,38 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                 kind=Kind.PRODUCTION,
             ),
         ]
+
+    def price_stream(self) -> PriceStream:
+        """The hourly tariff price statistic for this entry (EE zone, so one per entry)."""
+        currency = self.hass.config.currency or "EUR"
+        return PriceStream(
+            statistic_id=f"{DOMAIN}:{self.slug}_price",
+            name=f"{self.slug} price",
+            unit=f"{currency}/kWh",
+        )
+
+    def _publish_price_statistics(self, *, full: bool = False) -> None:
+        """Write the tariff-applied hourly price from the NPS cache as a statistic.
+
+        Ticks publish incrementally from the last written hour; cache warm-up,
+        backfill and a tariff rebuild pass ``full=True`` to (re)write every
+        cached hour. Gas-only entries have no price.
+        """
+        if self._nps is None or not any(
+            m.commodity_type.value == "ELECTRICITY" for m in self.meters
+        ):
+            return
+        now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
+        rows = compute_price_rows(
+            self._nps.cached_prices,
+            self._build_tariff(),
+            until=now_hour,
+            since=None if full else self._price_published_until,
+        )
+        if not rows:
+            return
+        async_write_price_statistics(self.hass, self.price_stream(), rows)
+        self._price_published_until = rows[-1]["start"]
 
     def _build_tariff(self) -> Tariff:
         """Construct the tariff function from current options.
@@ -271,6 +308,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
             )
         except EstfeedError as err:
             raise UpdateFailed(str(err)) from err
+        self._publish_price_statistics()
         await self.async_ensure_baselines()
         await self._flush_baselines_if_dirty()
 
@@ -292,6 +330,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # plus the backfill_history service) populate the cache without notifying
         # CoordinatorEntity listeners, so the sensor state stays frozen at the
         # value computed before the background fill finished. Nudge listeners.
+        self._publish_price_statistics(full=True)
         self.async_update_listeners()
 
     async def async_rebuild_cost(self) -> None:
@@ -349,6 +388,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                     tariff,
                     prior_sum=0.0,
                 )
+        self._publish_price_statistics(full=True)
         self.async_update_listeners()
 
     async def _hourly_energy_from_stats(
@@ -393,6 +433,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         start = end - timedelta(days=ROLLING_CACHE_DAYS)
         await self._fetch_window(start, end, write_stats=False, force_start=True)
         await self.async_warm_prices(start, end)
+        self._publish_price_statistics(full=True)
         await self.async_ensure_baselines()
         await self._flush_baselines_if_dirty()
         self.async_update_listeners()

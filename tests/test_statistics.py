@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
@@ -402,3 +402,47 @@ def test_compute_statistic_rows_aggregates_subhour_intervals():
     assert len(rows) == 1
     assert rows[0]["start"] == datetime(2026, 5, 2, 10, 0, tzinfo=UTC)
     assert rows[0]["sum"] == pytest.approx(1.0)
+
+
+def test_compute_price_rows_applies_tariff_and_bounds():
+    from custom_components.estfeed.statistics import compute_price_rows
+
+    h = datetime(2026, 9, 13, 10, tzinfo=UTC)
+    prices = {
+        h - timedelta(hours=2): 0.05,
+        h - timedelta(hours=1): 0.10,
+        h: 0.20,
+        h + timedelta(hours=1): 0.30,  # known day-ahead hour, must not be written
+    }
+    rows = compute_price_rows(prices, lambda spot, _hour: spot * 2, until=h)
+    assert [r["start"] for r in rows] == [h - timedelta(hours=2), h - timedelta(hours=1), h]
+    assert rows[0]["mean"] == rows[0]["min"] == rows[0]["max"] == pytest.approx(0.10)
+    assert rows[-1]["mean"] == pytest.approx(0.40)
+
+    incremental = compute_price_rows(
+        prices, lambda spot, _hour: spot, until=h, since=h - timedelta(hours=1)
+    )
+    assert [r["start"] for r in incremental] == [h - timedelta(hours=1), h]
+
+
+@pytest.mark.asyncio
+async def test_async_write_price_statistics_writes_mean_metadata(hass):
+    from custom_components.estfeed.statistics import PriceStream, async_write_price_statistics
+
+    stream = PriceStream(statistic_id="estfeed:home_price", name="home price", unit="EUR/kWh")
+    rows = [{"start": datetime(2026, 9, 13, 10, tzinfo=UTC), "mean": 0.1, "min": 0.1, "max": 0.1}]
+    with patch(
+        "custom_components.estfeed.statistics.async_add_external_statistics", new=Mock()
+    ) as mock_add:
+        async_write_price_statistics(hass, stream, rows)
+        async_write_price_statistics(hass, stream, [])
+
+    mock_add.assert_called_once()
+    metadata = mock_add.call_args.args[1]
+    assert metadata["statistic_id"] == "estfeed:home_price"
+    assert metadata["source"] == "estfeed"
+    assert metadata["unit_of_measurement"] == "EUR/kWh"
+    assert metadata["has_mean"] is True
+    assert metadata["has_sum"] is False
+    assert "unit_class" not in metadata
+    assert mock_add.call_args.args[2] == rows

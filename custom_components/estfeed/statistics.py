@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -23,8 +24,10 @@ try:
     )
 
     _MEAN_TYPE_NONE: Any = StatisticMeanType.NONE
+    _MEAN_TYPE_ARITHMETIC: Any = StatisticMeanType.ARITHMETIC
 except ImportError:
     _MEAN_TYPE_NONE = None
+    _MEAN_TYPE_ARITHMETIC = None
 
 # HA 2026.11 will also require `unit_class` in StatisticMetaData. Older HA
 # versions ignore the key; declaring it now silences the deprecation warning
@@ -222,3 +225,61 @@ async def async_write_cost_statistics_from_hourly(
     """
     rows = compute_cost_rows_from_hourly(hourly_energy, prices, tariff, prior_sum=prior_sum)
     return _publish_cost_rows(hass, stream, rows, prior_sum)
+
+
+@dataclass(frozen=True, slots=True)
+class PriceStream:
+    """Identifies the hourly tariff price statistic (one per config entry)."""
+
+    statistic_id: str
+    name: str
+    unit: str  # e.g. "EUR/kWh"
+
+
+def compute_price_rows(
+    prices: Mapping[datetime, float],
+    tariff: Tariff,
+    *,
+    until: datetime,
+    since: datetime | None = None,
+) -> list[StatisticData]:
+    """Turn cached spot prices into mean/min/max rows of the full tariff price.
+
+    ``prices`` maps top-of-hour UTC to the spot price in EUR/kWh (the NPS
+    cache). Hours after ``until`` are skipped so no statistic is written
+    for the future even though day-ahead prices are known; ``since``
+    (inclusive) limits an incremental publish to hours not written yet.
+    """
+    rows: list[StatisticData] = []
+    for hour in sorted(prices):
+        if hour > until or (since is not None and hour < since):
+            continue
+        price = round(tariff(prices[hour], hour), 5)
+        rows.append({"start": hour, "mean": price, "min": price, "max": price})
+    return rows
+
+
+def async_write_price_statistics(
+    hass: HomeAssistant, stream: PriceStream, rows: list[StatisticData]
+) -> None:
+    """Publish tariff price rows as an external mean statistic.
+
+    Gives dashboards a price history from the first install instead of
+    from whenever a price sensor started being recorded; a re-publish of an
+    existing hour updates the row in place, so a tariff option change can
+    rewrite the whole cached window.
+    """
+    if not rows:
+        return
+    metadata: StatisticMetaData = {
+        "source": DOMAIN,
+        "statistic_id": stream.statistic_id,
+        "name": stream.name,
+        "unit_of_measurement": stream.unit,
+        "has_sum": False,
+        "has_mean": True,
+    }
+    if _MEAN_TYPE_ARITHMETIC is not None:
+        metadata["mean_type"] = _MEAN_TYPE_ARITHMETIC  # type: ignore[typeddict-unknown-key]
+    # No unit_class: a currency-per-energy unit has no HA converter.
+    async_add_external_statistics(hass, metadata, rows)
