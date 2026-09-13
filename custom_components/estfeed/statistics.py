@@ -236,24 +236,15 @@ class PriceStream:
     unit: str  # e.g. "EUR/kWh"
 
 
-def compute_price_rows(
-    prices: Mapping[datetime, float],
-    tariff: Tariff,
-    *,
-    until: datetime,
-    since: datetime | None = None,
-) -> list[StatisticData]:
+def compute_price_rows(prices: Mapping[datetime, float], tariff: Tariff) -> list[StatisticData]:
     """Turn cached spot prices into mean/min/max rows of the full tariff price.
 
     ``prices`` maps top-of-hour UTC to the spot price in EUR/kWh (the NPS
-    cache). Hours after ``until`` are skipped so no statistic is written
-    for the future even though day-ahead prices are known; ``since``
-    (inclusive) limits an incremental publish to hours not written yet.
+    cache). Day-ahead hours are included: the price is final once Elering
+    publishes it, and a day's mean is only meaningful over the whole day.
     """
     rows: list[StatisticData] = []
     for hour in sorted(prices):
-        if hour > until or (since is not None and hour < since):
-            continue
         price = round(tariff(prices[hour], hour), 5)
         rows.append({"start": hour, "mean": price, "min": price, "max": price})
     return rows

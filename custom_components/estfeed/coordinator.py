@@ -38,6 +38,7 @@ from .const import (
     CONF_NIGHT_START_HOUR,
     CONF_RESOLUTION,
     CONF_VAT_PERCENT,
+    DAY_AHEAD_HORIZON_DAYS,
     DEFAULT_FEES_EUR_PER_KWH,
     DEFAULT_GRID_EUR_PER_KWH,
     DEFAULT_MARGIN_EUR_PER_KWH,
@@ -154,8 +155,9 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         # as the default lazy client; production wiring overrides it via
         # ``attach_nps_client`` before any fetch happens.
         self._nps: EleringNpsClient | None = None
-        # Last hour written to the price statistic; ticks publish from here.
-        self._price_published_until: datetime | None = None
+        # Hour -> tariff price last written to the price statistic, so a tick
+        # only re-sends hours that are new or whose cached price changed.
+        self._published_prices: dict[datetime, float] = {}
         self.last_nps_error: str | None = None
 
     def attach_nps_client(self, nps: EleringNpsClient) -> None:
@@ -222,25 +224,23 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
     def _publish_price_statistics(self, *, full: bool = False) -> None:
         """Write the tariff-applied hourly price from the NPS cache as a statistic.
 
-        Ticks publish incrementally from the last written hour; cache warm-up,
-        backfill and a tariff rebuild pass ``full=True`` to (re)write every
-        cached hour. Gas-only entries have no price.
+        Only hours that are new or whose price changed since the last publish
+        are sent; ``full=True`` (cache warm-up, backfill, tariff rebuild)
+        rewrites every cached hour. Gas-only entries have no price.
         """
         if self._nps is None or not any(
             m.commodity_type.value == "ELECTRICITY" for m in self.meters
         ):
             return
-        now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
-        rows = compute_price_rows(
-            self._nps.cached_prices,
-            self._build_tariff(),
-            until=now_hour,
-            since=None if full else self._price_published_until,
-        )
-        if not rows:
+        if full:
+            self._published_prices.clear()
+        rows = compute_price_rows(self._nps.cached_prices, self._build_tariff())
+        changed = [r for r in rows if self._published_prices.get(r["start"]) != r["mean"]]
+        if not changed:
             return
-        async_write_price_statistics(self.hass, self.price_stream(), rows)
-        self._price_published_until = rows[-1]["start"]
+        async_write_price_statistics(self.hass, self.price_stream(), changed)
+        for row in changed:
+            self._published_prices[row["start"]] = float(row["mean"])
 
     def _build_tariff(self) -> Tariff:
         """Construct the tariff function from current options.
@@ -308,6 +308,10 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
             )
         except EstfeedError as err:
             raise UpdateFailed(str(err)) from err
+        # Day-ahead prices land around 14:00 local; pick them up so the price
+        # statistic (and today's mean) covers the whole published horizon.
+        now = datetime.now(tz=UTC)
+        await self.async_warm_prices(now, now + timedelta(days=DAY_AHEAD_HORIZON_DAYS))
         self._publish_price_statistics()
         await self.async_ensure_baselines()
         await self._flush_baselines_if_dirty()

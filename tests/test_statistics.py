@@ -404,25 +404,15 @@ def test_compute_statistic_rows_aggregates_subhour_intervals():
     assert rows[0]["sum"] == pytest.approx(1.0)
 
 
-def test_compute_price_rows_applies_tariff_and_bounds():
+def test_compute_price_rows_applies_tariff_and_sorts():
     from custom_components.estfeed.statistics import compute_price_rows
 
     h = datetime(2026, 9, 13, 10, tzinfo=UTC)
-    prices = {
-        h - timedelta(hours=2): 0.05,
-        h - timedelta(hours=1): 0.10,
-        h: 0.20,
-        h + timedelta(hours=1): 0.30,  # known day-ahead hour, must not be written
-    }
-    rows = compute_price_rows(prices, lambda spot, _hour: spot * 2, until=h)
-    assert [r["start"] for r in rows] == [h - timedelta(hours=2), h - timedelta(hours=1), h]
-    assert rows[0]["mean"] == rows[0]["min"] == rows[0]["max"] == pytest.approx(0.10)
-    assert rows[-1]["mean"] == pytest.approx(0.40)
-
-    incremental = compute_price_rows(
-        prices, lambda spot, _hour: spot, until=h, since=h - timedelta(hours=1)
-    )
-    assert [r["start"] for r in incremental] == [h - timedelta(hours=1), h]
+    prices = {h: 0.20, h - timedelta(hours=1): 0.10, h + timedelta(hours=1): 0.30}
+    rows = compute_price_rows(prices, lambda spot, _hour: spot * 2)
+    assert [r["start"] for r in rows] == [h - timedelta(hours=1), h, h + timedelta(hours=1)]
+    assert rows[0]["mean"] == rows[0]["min"] == rows[0]["max"] == pytest.approx(0.20)
+    assert rows[-1]["mean"] == pytest.approx(0.60)
 
 
 @pytest.mark.asyncio

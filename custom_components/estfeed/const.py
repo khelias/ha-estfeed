@@ -51,6 +51,9 @@ TARIFF_OPTION_KEYS: Final = (
 
 UPDATE_INTERVAL: Final = timedelta(hours=1)
 ROLLING_CACHE_DAYS: Final = 62
+# How far past now the hourly tick fetches spot prices: Elering publishes
+# the next day around 14:00 local, so two days always covers what exists.
+DAY_AHEAD_HORIZON_DAYS: Final = 2
 DATA_FRESH_THRESHOLD: Final = timedelta(hours=30)
 
 API_BASE_URL: Final = "https://estfeed.elering.ee"

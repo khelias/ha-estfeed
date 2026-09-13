@@ -1461,18 +1461,13 @@ async def test_warm_prices_noop_without_nps(hass):
     assert coord.last_nps_error is None
 
 
-def test_publish_price_statistics_is_incremental_between_ticks(hass):
-    """Warm-up writes every cached hour up to now; a tick only re-sends from the
-    last published hour, and known day-ahead hours are never written."""
+def test_publish_price_statistics_sends_only_new_or_changed_hours(hass):
+    """Warm-up writes every cached hour (day-ahead included); a tick re-sends
+    only hours that appeared or whose cached price changed."""
     coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
     coord.meters = [_make_meter()]
-    now_hour = datetime.now(tz=UTC).replace(minute=0, second=0, microsecond=0)
-    cache = {
-        now_hour - timedelta(hours=2): 0.05,
-        now_hour - timedelta(hours=1): 0.05,
-        now_hour: 0.05,
-        now_hour + timedelta(hours=3): 0.05,
-    }
+    h = datetime(2026, 9, 13, 10, tzinfo=UTC)
+    cache = {h: 0.05, h + timedelta(hours=1): 0.05, h + timedelta(hours=20): 0.05}
     mock_nps = MagicMock()
     type(mock_nps).cached_prices = property(lambda _self: dict(cache))
     coord.attach_nps_client(mock_nps)
@@ -1483,18 +1478,19 @@ def test_publish_price_statistics_is_incremental_between_ticks(hass):
         stream, rows = mock_write.call_args.args[1], mock_write.call_args.args[2]
         assert stream.statistic_id == "estfeed:home_price"
         assert stream.unit.endswith("/kWh")
-        assert [r["start"] for r in rows] == [
-            now_hour - timedelta(hours=2),
-            now_hour - timedelta(hours=1),
-            now_hour,
-        ]
+        assert [r["start"] for r in rows] == sorted(cache)
         # Default tariff: 22 % VAT, no margin/grid/fees.
         assert rows[0]["mean"] == pytest.approx(0.061)
 
-        cache[now_hour + timedelta(hours=1)] = 0.07  # still in the future: ignored
+        coord._publish_price_statistics()  # nothing new
+        assert mock_write.call_count == 1
+
+        cache[h + timedelta(hours=1)] = 0.07  # re-fetched after a partial hour
+        cache[h + timedelta(hours=21)] = 0.05  # day-ahead hour published
         coord._publish_price_statistics()
         rows = mock_write.call_args.args[2]
-        assert [r["start"] for r in rows] == [now_hour]
+        assert [r["start"] for r in rows] == [h + timedelta(hours=1), h + timedelta(hours=21)]
+        assert rows[0]["mean"] == pytest.approx(0.0854)
     assert mock_write.call_count == 2
 
 

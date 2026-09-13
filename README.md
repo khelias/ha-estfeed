@@ -53,7 +53,7 @@ Defaults: VAT 22 %, everything else 0, which reduces to the previous `spot × VA
 
 ### Hourly price statistic
 
-Electricity entries also publish `estfeed:<your_name>_price` (unit `<currency>/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, so price history is available from the first install rather than from whenever a price sensor started being recorded. It is written incrementally on every hourly tick, over the whole cached window after a restart or backfill, and rewritten when the tariff options change. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.
+Electricity entries also publish `estfeed:<your_name>_price` (unit `<currency>/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, including the day-ahead hours Elering has already published, so price history is available from the first install rather than from whenever a price sensor started being recorded. Every hourly tick writes the hours that are new or changed, a restart or backfill writes the whole cached window, and a tariff option change rewrites it. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.
 
 To wire them into the Energy dashboard:
 
