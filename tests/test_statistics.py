@@ -295,8 +295,8 @@ async def test_async_write_cost_statistics_writes_eur_metadata(hass):
     assert metadata["unit_of_measurement"] == "EUR"
     assert metadata["has_sum"] is True
     assert metadata["has_mean"] is False
-    # No unit_class for monetary streams — unit_class is for unit conversion.
-    assert "unit_class" not in metadata
+    # The key must be present from HA 2026.11; None because EUR has no converter.
+    assert metadata["unit_class"] is None
     assert len(rows) == 1
     assert rows[0]["sum"] == pytest.approx(0.10)
     assert result == pytest.approx(0.10)
@@ -360,7 +360,7 @@ async def test_async_write_cost_statistics_from_hourly_prices_stored_energy(hass
     mock_add.assert_called_once()
     metadata, rows = mock_add.call_args.args[1], mock_add.call_args.args[2]
     assert metadata["unit_of_measurement"] == "EUR"
-    assert "unit_class" not in metadata
+    assert metadata["unit_class"] is None
     # cumulative: 2.0*0.05=0.10 then +1.0*0.05=0.15
     assert [r["sum"] for r in rows] == [pytest.approx(0.10), pytest.approx(0.15)]
     assert result == pytest.approx(0.15)
@@ -434,5 +434,5 @@ async def test_async_write_price_statistics_writes_mean_metadata(hass):
     assert metadata["unit_of_measurement"] == "EUR/kWh"
     assert metadata["has_mean"] is True
     assert metadata["has_sum"] is False
-    assert "unit_class" not in metadata
+    assert metadata["unit_class"] is None
     assert mock_add.call_args.args[2] == rows

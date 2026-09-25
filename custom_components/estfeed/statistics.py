@@ -29,10 +29,10 @@ except ImportError:
     _MEAN_TYPE_NONE = None
     _MEAN_TYPE_ARITHMETIC = None
 
-# HA 2026.11 will also require `unit_class` in StatisticMetaData. Older HA
-# versions ignore the key; declaring it now silences the deprecation warning
-# and keeps statistics working past the cutover. Values match the converter
-# UNIT_CLASS attributes in homeassistant.util.unit_conversion.
+# HA 2026.11 requires the `unit_class` key to be present in StatisticMetaData,
+# with None for units that have no converter (currencies, EUR/kWh). Older HA
+# versions ignore the key. Values match the converter UNIT_CLASS attributes in
+# homeassistant.util.unit_conversion.
 _UNIT_CLASS_BY_UNIT = {
     "kWh": "energy",
     "m³": "volume",
@@ -130,10 +130,7 @@ async def async_write_meter_statistics(
         # Required from HA 2026.11; absent on older HA versions where the
         # enum doesn't exist (the metadata key is ignored there).
         metadata["mean_type"] = _MEAN_TYPE_NONE  # type: ignore[typeddict-unknown-key]
-    unit_class = _UNIT_CLASS_BY_UNIT.get(stream.unit)
-    if unit_class is not None:
-        # Required from HA 2026.11; older HA versions ignore unknown keys.
-        metadata["unit_class"] = unit_class  # type: ignore[typeddict-unknown-key]
+    metadata["unit_class"] = _UNIT_CLASS_BY_UNIT.get(stream.unit)  # type: ignore[typeddict-unknown-key]
     # async_add_external_statistics is a synchronous @callback in this HA version
     # (inspect.iscoroutinefunction returned False); no await needed.
     async_add_external_statistics(hass, metadata, rows)
@@ -170,7 +167,7 @@ def _publish_cost_rows(
     }
     if _MEAN_TYPE_NONE is not None:
         metadata["mean_type"] = _MEAN_TYPE_NONE  # type: ignore[typeddict-unknown-key]
-    # No unit_class — unit_class is for energy/volume/mass conversion, not currencies.
+    metadata["unit_class"] = None  # type: ignore[typeddict-unknown-key]
     async_add_external_statistics(hass, metadata, rows)
     last_sum = rows[-1].get("sum")
     return float(last_sum) if last_sum is not None else prior_sum
@@ -260,5 +257,5 @@ def async_write_price_statistics(
     }
     if _MEAN_TYPE_ARITHMETIC is not None:
         metadata["mean_type"] = _MEAN_TYPE_ARITHMETIC  # type: ignore[typeddict-unknown-key]
-    # No unit_class: a currency-per-energy unit has no HA converter.
+    metadata["unit_class"] = None  # type: ignore[typeddict-unknown-key]
     async_add_external_statistics(hass, metadata, rows)
