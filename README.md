@@ -49,11 +49,11 @@ Both are computed by multiplying each hour's consumption/production by the match
 - **Fees** are the fixed per-kWh items quoted excl. VAT (renewable energy levy, security of supply, excise, balancing).
 - **Margin** is the supplier's per-kWh margin, quoted incl. VAT, so it lands after the VAT multiplication. Can be negative.
 
-Defaults: VAT 22 %, everything else 0, which reduces to the previous `spot × VAT + margin` behaviour. Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Adjust in the integration options.
+Defaults: VAT 22 %, everything else 0, which reduces to the previous `spot × VAT + margin` behaviour. Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Adjust in the integration options. Prices are denominated in **EUR** (the NPS API's native currency); the statistics are labelled EUR regardless of your Home Assistant currency setting.
 
 ### Hourly price statistic
 
-Electricity entries also publish `estfeed:<your_name>_price` (unit `<currency>/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, including the day-ahead hours Elering has already published, so price history is available from the first install rather than from whenever a price sensor started being recorded. Every hourly tick writes the hours that are new or changed, a restart or backfill writes the whole cached window, and a tariff option change rewrites it. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.
+Electricity entries also publish `estfeed:<your_name>_price` (unit `EUR/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, including the day-ahead hours Elering has already published, so price history is available from the first install rather than from whenever a price sensor started being recorded. Every hourly tick writes the hours that are new or changed, a restart or backfill writes the whole cached window, and a tariff option change rewrites it. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.
 
 To wire them into the Energy dashboard:
 
@@ -82,11 +82,15 @@ For each metering point:
 
 ## Services
 
-- `estfeed.backfill_history(months=24, entry_id=<uuid>)` — re-fetch and re-publish the last N months of statistics. Idempotent.
+- `estfeed.backfill_history(months=24, entry_id=<uuid>)` — re-fetch and re-publish the last N months of statistics. Rebuilds chain onto the cumulative sum at the window start, so history outside the window stays consistent.
+- `estfeed.set_cumulative_reset_at(reset_at=..., entry_id=<uuid>)` — move the cumulative-since-reset baseline to a specific timestamp (e.g. to restore a previous anchor after an accidental reset). Restores both consumption and production baselines.
 
 ## Limitations
 
 - Not real-time: hours need to settle before their kWh value is final (see the note at the top).
+- Cost/compensation statistics are an estimate from the tariff above: time-windowed supplier margins, monthly fixed charges and anything else not priced per kWh are not modelled. For anything fancier, unpair the cost statistic and use HA's built-in Energy cost configuration instead.
+- Cost statistics are denominated in EUR (NPS prices are EUR; no conversion is applied).
+- The cumulative-since-reset sensor recomputes from a 62-day rolling cache plus a frozen sum; if Home Assistant is offline for more than ~62 days, consumption from the outage window beyond those 62 days is not recovered into the cumulative total.
 - API rate limit: 1 request per 5 seconds (per API key) — handled internally.
 
 ## Development
