@@ -61,7 +61,7 @@ To wire them into the Energy dashboard:
 2. Under "Use an entity tracking the total costs", select `estfeed:<your_name>_cost_<eic_suffix>`.
 3. Repeat for "Return to grid" → pair `estfeed:<your_name>_production_<eic_suffix>` with `estfeed:<your_name>_compensation_<eic_suffix>`.
 
-Changing VAT or margin in the integration options automatically rebuilds the cost/compensation history over the configured backfill window, so the dashboard reflects the new tariff retroactively.
+Changing any tariff option (VAT, margin, fees, grid day or night rate, night hours, or the weekend and holiday night settings) in the integration options automatically rebuilds the cost/compensation history over the configured backfill window, so the dashboard reflects the new tariff retroactively.
 
 Gas meters do not publish cost statistics (no spot-price source).
 
@@ -102,6 +102,7 @@ pip install -e . --config-settings editable_mode=compat
 pip install pytest pytest-asyncio pytest-cov pytest-homeassistant-custom-component homeassistant aioresponses freezegun ruff mypy
 pytest tests --cov=custom_components/estfeed
 ruff check custom_components tests
+ruff format --check custom_components tests
 mypy
 ~~~
 
