@@ -151,7 +151,7 @@ class EleringNpsClient:
             rows = payload["data"]["ee"]
             if not isinstance(rows, list):
                 raise TypeError("Expected a list of prices")
-            buckets: dict[datetime, list[float]] = {}
+            buckets: dict[datetime, list[tuple[int, float]]] = {}
             for row in rows:
                 ts = row.get("timestamp")
                 price_eur_per_mwh = row.get("price")
@@ -164,8 +164,15 @@ class EleringNpsClient:
                 if not start <= timestamp < end:
                     continue
                 hour = timestamp.replace(minute=0, second=0, microsecond=0)
-                buckets.setdefault(hour, []).append(price)
+                buckets.setdefault(hour, []).append((timestamp.minute, price))
         except (KeyError, TypeError, ValueError, AttributeError, OverflowError, OSError) as err:
             raise NpsError("NPS returned invalid price data") from err
-        for hour, prices in buckets.items():
+        for hour, quarters in buckets.items():
+            # An hour of quarter data with quarters missing is incomplete; leave
+            # it out of the cache so the next call fetches it again. Hourly-era
+            # data (before the 15-min switch) has one row at :00 and is complete.
+            has_quarters = any(minute != 0 for minute, _ in quarters)
+            if has_quarters and len(quarters) < 4:
+                continue
+            prices = [p for _, p in quarters]
             self._cache[hour] = (sum(prices) / len(prices)) / 1000.0
