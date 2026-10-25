@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import (
@@ -14,9 +14,10 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfEnergy
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import AccountingInterval, MeteringPoint, interval_value
@@ -213,6 +214,72 @@ class CostSensor(_EstfeedEntity, SensorEntity):
         }
 
 
+class PriceNowSensor(_EstfeedEntity, SensorEntity):
+    """Billed EUR/kWh for the current hour, from the tariff in force now.
+
+    Follows the options: spot or fixed contract, grid day/night, fees, VAT,
+    and archived tariff periods. Refreshes at the top of every hour, when the
+    spot price or the day/night grid rate changes.
+    """
+
+    _attr_suggested_display_precision = 4
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_translation_key = "price_now"
+
+    def __init__(self, coordinator: EstfeedCoordinator, meter: MeteringPoint) -> None:
+        super().__init__(coordinator, meter)
+        suffix = eic_suffix(meter.eic)
+        self._attr_unique_id = f"{DOMAIN}_{coordinator.slug}_price_now_{suffix}"
+        currency = coordinator.hass.config.currency or "EUR"
+        self._attr_native_unit_of_measurement = f"{currency}/kWh"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_change(self.hass, self._handle_hour_change, minute=0, second=5)
+        )
+
+    @callback
+    def _handle_hour_change(self, _now: datetime) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        price = self.coordinator.price_at(datetime.now(tz=UTC))
+        return None if price is None else round(price, 5)
+
+
+class BillForecastSensor(_EstfeedEntity, SensorEntity):
+    """Projected bill for the current month incl. monthly fees (EUR)."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 2
+    _attr_translation_key = "bill_forecast"
+
+    def __init__(self, coordinator: EstfeedCoordinator, meter: MeteringPoint) -> None:
+        super().__init__(coordinator, meter)
+        suffix = eic_suffix(meter.eic)
+        self._attr_unique_id = f"{DOMAIN}_{coordinator.slug}_bill_forecast_{suffix}"
+        self._attr_native_unit_of_measurement = coordinator.hass.config.currency or "EUR"
+
+    def _compute(self) -> dict[str, Any] | None:
+        return self.coordinator.bill_forecast(self._meter.eic, datetime.now(tz=UTC))
+
+    @property
+    def available(self) -> bool:
+        return self._compute() is not None
+
+    @property
+    def native_value(self) -> float | None:
+        result = self._compute()
+        return None if result is None else result["forecast"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        result = self._compute() or {}
+        return {k: v for k, v in result.items() if k != "forecast"}
+
+
 class CumulativeSinceResetSensor(_EstfeedEntity, SensorEntity):
     """Total consumption/production since the last reset.
 
@@ -317,4 +384,7 @@ async def async_setup_entry(
                     entities.append(CostSensor(coordinator, meter, kind, period))
             entities.append(CumulativeSinceResetSensor(coordinator, meter, kind))
         entities.append(LatestIntervalSensor(coordinator, meter))
+        if meter.commodity_type == CommodityType.ELECTRICITY:
+            entities.append(PriceNowSensor(coordinator, meter))
+            entities.append(BillForecastSensor(coordinator, meter))
     async_add_entities(entities)

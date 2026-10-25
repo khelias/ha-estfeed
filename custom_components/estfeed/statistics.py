@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import AccountingInterval, interval_value
 from .const import DOMAIN, Kind
-from .pricing import Tariff, compute_cost_rows, compute_cost_rows_from_hourly
+from .pricing import HourlyFee, Tariff, compute_cost_rows, compute_cost_rows_from_hourly
 
 # HA 2026.11 will require `mean_type` in StatisticMetaData; older HA versions
 # don't expose StatisticMeanType. Detect at import time and only set the field
@@ -188,6 +188,7 @@ async def async_write_cost_statistics(
     prices: dict[datetime, float],
     tariff: Tariff,
     prior_sum: float,
+    hourly_fee: HourlyFee | None = None,
 ) -> float:
     """Compute cost rows from raw intervals for one meter+kind and publish them.
 
@@ -197,7 +198,9 @@ async def async_write_cost_statistics(
     were produced). Caller chains the return value as the next chunk's
     ``prior_sum`` to avoid a read-after-write hazard against HA's recorder.
     """
-    rows = compute_cost_rows(intervals, stream.kind, prices, tariff, prior_sum=prior_sum)
+    rows = compute_cost_rows(
+        intervals, stream.kind, prices, tariff, prior_sum=prior_sum, hourly_fee=hourly_fee
+    )
     return _publish_cost_rows(hass, stream, rows, prior_sum)
 
 
@@ -208,6 +211,7 @@ async def async_write_cost_statistics_from_hourly(
     prices: dict[datetime, float],
     tariff: Tariff,
     prior_sum: float,
+    hourly_fee: HourlyFee | None = None,
 ) -> float:
     """Publish cost rows derived from a per-hour energy map.
 
@@ -216,7 +220,9 @@ async def async_write_cost_statistics_from_hourly(
     exactly consistent with the consumption/production the user already sees,
     even when Estfeed revises recent intervals between fetches.
     """
-    rows = compute_cost_rows_from_hourly(hourly_energy, prices, tariff, prior_sum=prior_sum)
+    rows = compute_cost_rows_from_hourly(
+        hourly_energy, prices, tariff, prior_sum=prior_sum, hourly_fee=hourly_fee
+    )
     return _publish_cost_rows(hass, stream, rows, prior_sum)
 
 

@@ -1,0 +1,164 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Estfeed",
+        "description": "Connect to your e-Elering API key",
+        "data": {
+          "client_id": "Client ID (UUID)",
+          "client_secret": "Client secret",
+          "friendly_name": "Friendly name"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Estfeed",
+        "data": {
+          "client_id": "Client ID (UUID)",
+          "client_secret": "Client secret"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid client_id or client_secret",
+      "cannot_connect": "Could not reach the Estfeed API",
+      "slug_in_use": "Another Estfeed entry already uses this friendly name"
+    },
+    "abort": {
+      "already_configured": "This API key is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки Estfeed",
+        "data": {
+          "resolution": "Детализация данных",
+          "backfill_months": "Глубина загрузки истории (месяцев)",
+          "tariff_effective_from": "Тариф действует с (пусто — применить ко всей истории)",
+          "use_spot_price": "Биржевой тариф (Nord Pool) — выключите для фиксированной цены",
+          "vat_percent": "НДС (%)",
+          "margin_eur_per_kwh": "Маржа продавца (EUR/кВт·ч с НДС); при фиксированной цене — цена энергии с НДС",
+          "fees_eur_per_kwh": "Сборы за кВт·ч без НДС (возобновляемая энергия, акциз, ...)",
+          "grid_day_eur_per_kwh": "Сетевой тариф днём (EUR/кВт·ч без НДС)",
+          "grid_night_eur_per_kwh": "Сетевой тариф ночью (EUR/кВт·ч без НДС)",
+          "night_start_hour": "Ночной тариф начинается в (час)",
+          "night_end_hour": "Ночной тариф заканчивается в (час)",
+          "night_on_weekends": "Ночной тариф все выходные",
+          "night_on_holidays": "Ночной тариф в госпраздники",
+          "monthly_fees_eur": "Абонентские платы в месяц с НДС, EUR (продавец + сеть) — распределяются по часам месяца и входят в стоимость"
+        },
+        "description": "Тарифные периоды:\n{history}\n\nПри смене тарифа укажите дату, с которой он действует: часы до этой даты останутся по старому тарифу. Оставляйте дату пустой, только если исправляете тариф для всей истории."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "consumption_today": {
+        "name": "Consumption today"
+      },
+      "consumption_yesterday": {
+        "name": "Consumption yesterday"
+      },
+      "consumption_month_to_date": {
+        "name": "Consumption month-to-date"
+      },
+      "consumption_previous_month": {
+        "name": "Consumption previous month"
+      },
+      "production_today": {
+        "name": "Production today"
+      },
+      "production_yesterday": {
+        "name": "Production yesterday"
+      },
+      "production_month_to_date": {
+        "name": "Production month-to-date"
+      },
+      "production_previous_month": {
+        "name": "Production previous month"
+      },
+      "consumption_cumulative": {
+        "name": "Cumulative consumption"
+      },
+      "production_cumulative": {
+        "name": "Cumulative production"
+      },
+      "cost_today": {
+        "name": "Cost today"
+      },
+      "cost_yesterday": {
+        "name": "Cost yesterday"
+      },
+      "cost_month_to_date": {
+        "name": "Cost month-to-date"
+      },
+      "cost_previous_month": {
+        "name": "Cost previous month"
+      },
+      "compensation_today": {
+        "name": "Compensation today"
+      },
+      "compensation_yesterday": {
+        "name": "Compensation yesterday"
+      },
+      "compensation_month_to_date": {
+        "name": "Compensation month-to-date"
+      },
+      "compensation_previous_month": {
+        "name": "Compensation previous month"
+      },
+      "latest_interval": {
+        "name": "Latest interval"
+      },
+      "price_now": {
+        "name": "Цена сейчас"
+      },
+      "bill_forecast": {
+        "name": "Прогноз счёта за месяц"
+      }
+    },
+    "binary_sensor": {
+      "data_fresh": {
+        "name": "Data fresh"
+      }
+    },
+    "button": {
+      "consumption_cumulative_reset": {
+        "name": "Reset cumulative consumption"
+      },
+      "production_cumulative_reset": {
+        "name": "Reset cumulative production"
+      }
+    }
+  },
+  "services": {
+    "backfill_history": {
+      "name": "Backfill history",
+      "description": "Re-fetch and re-publish a wider window of long-term statistics.",
+      "fields": {
+        "months": {
+          "name": "Months",
+          "description": "How many months of history to refetch (1-84)."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Which Estfeed config entry to backfill."
+        }
+      }
+    },
+    "set_cumulative_reset_at": {
+      "name": "Set cumulative reset_at",
+      "description": "Move the cumulative-since-reset baseline to a specific timestamp (e.g. to restore a previous anchor). Restores both consumption and production baselines.",
+      "fields": {
+        "reset_at": {
+          "name": "Reset at",
+          "description": "New anchor timestamp. The cumulative sensors will sum intervals from this moment forward."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Which Estfeed config entry to update."
+        }
+      }
+    }
+  }
+}

@@ -34,47 +34,101 @@
         "data": {
           "resolution": "Data resolution",
           "backfill_months": "Backfill window (months)",
+          "tariff_effective_from": "Tariff valid from (leave empty to apply to all history)",
+          "use_spot_price": "Exchange (spot) price contract — off for a fixed-price contract",
           "vat_percent": "VAT percentage (%)",
-          "margin_eur_per_kwh": "Supplier margin (EUR/kWh incl. VAT, can be negative)",
+          "margin_eur_per_kwh": "Supplier margin (EUR/kWh incl. VAT, can be negative); with a fixed-price contract: the fixed energy price incl. VAT",
           "fees_eur_per_kwh": "Fixed per-kWh fees excl. VAT (renewable levy, excise, ...)",
           "grid_day_eur_per_kwh": "Grid transfer, day rate (EUR/kWh excl. VAT)",
           "grid_night_eur_per_kwh": "Grid transfer, night rate (EUR/kWh excl. VAT)",
           "night_start_hour": "Night rate starts at (hour, local time)",
           "night_end_hour": "Night rate ends at (hour, local time)",
           "night_on_weekends": "Night rate all weekend",
-          "night_on_holidays": "Night rate on public holidays"
-        }
+          "night_on_holidays": "Night rate on public holidays",
+          "monthly_fees_eur": "Monthly fees incl. VAT, EUR (supplier + grid subscription) — spread over the hours of the month and included in the cost"
+        },
+        "description": "Tariff periods:\n{history}\n\nWhen you change the tariff, set the date it starts to apply: hours before that date keep the old tariff. Leave the date empty only to correct the tariff for the whole history."
       }
     }
   },
   "entity": {
     "sensor": {
-      "consumption_today": { "name": "Consumption today" },
-      "consumption_yesterday": { "name": "Consumption yesterday" },
-      "consumption_month_to_date": { "name": "Consumption month-to-date" },
-      "consumption_previous_month": { "name": "Consumption previous month" },
-      "production_today": { "name": "Production today" },
-      "production_yesterday": { "name": "Production yesterday" },
-      "production_month_to_date": { "name": "Production month-to-date" },
-      "production_previous_month": { "name": "Production previous month" },
-      "cost_today": { "name": "Cost today" },
-      "cost_yesterday": { "name": "Cost yesterday" },
-      "cost_month_to_date": { "name": "Cost month-to-date" },
-      "cost_previous_month": { "name": "Cost previous month" },
-      "compensation_today": { "name": "Compensation today" },
-      "compensation_yesterday": { "name": "Compensation yesterday" },
-      "compensation_month_to_date": { "name": "Compensation month-to-date" },
-      "compensation_previous_month": { "name": "Compensation previous month" },
-      "consumption_cumulative": { "name": "Cumulative consumption" },
-      "production_cumulative": { "name": "Cumulative production" },
-      "latest_interval": { "name": "Latest interval" }
+      "consumption_today": {
+        "name": "Consumption today"
+      },
+      "consumption_yesterday": {
+        "name": "Consumption yesterday"
+      },
+      "consumption_month_to_date": {
+        "name": "Consumption month-to-date"
+      },
+      "consumption_previous_month": {
+        "name": "Consumption previous month"
+      },
+      "production_today": {
+        "name": "Production today"
+      },
+      "production_yesterday": {
+        "name": "Production yesterday"
+      },
+      "production_month_to_date": {
+        "name": "Production month-to-date"
+      },
+      "production_previous_month": {
+        "name": "Production previous month"
+      },
+      "cost_today": {
+        "name": "Cost today"
+      },
+      "cost_yesterday": {
+        "name": "Cost yesterday"
+      },
+      "cost_month_to_date": {
+        "name": "Cost month-to-date"
+      },
+      "cost_previous_month": {
+        "name": "Cost previous month"
+      },
+      "compensation_today": {
+        "name": "Compensation today"
+      },
+      "compensation_yesterday": {
+        "name": "Compensation yesterday"
+      },
+      "compensation_month_to_date": {
+        "name": "Compensation month-to-date"
+      },
+      "compensation_previous_month": {
+        "name": "Compensation previous month"
+      },
+      "consumption_cumulative": {
+        "name": "Cumulative consumption"
+      },
+      "production_cumulative": {
+        "name": "Cumulative production"
+      },
+      "latest_interval": {
+        "name": "Latest interval"
+      },
+      "price_now": {
+        "name": "Price now"
+      },
+      "bill_forecast": {
+        "name": "Bill forecast this month"
+      }
     },
     "binary_sensor": {
-      "data_fresh": { "name": "Data fresh" }
+      "data_fresh": {
+        "name": "Data fresh"
+      }
     },
     "button": {
-      "consumption_cumulative_reset": { "name": "Reset cumulative consumption" },
-      "production_cumulative_reset": { "name": "Reset cumulative production" }
+      "consumption_cumulative_reset": {
+        "name": "Reset cumulative consumption"
+      },
+      "production_cumulative_reset": {
+        "name": "Reset cumulative production"
+      }
     }
   },
   "services": {
@@ -82,16 +136,28 @@
       "name": "Backfill history",
       "description": "Re-fetch and re-publish a wider window of long-term statistics.",
       "fields": {
-        "months": { "name": "Months", "description": "How many months of history to refetch (1-84)." },
-        "entry_id": { "name": "Config entry", "description": "Which Estfeed config entry to backfill." }
+        "months": {
+          "name": "Months",
+          "description": "How many months of history to refetch (1-84)."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Which Estfeed config entry to backfill."
+        }
       }
     },
     "set_cumulative_reset_at": {
       "name": "Set cumulative reset_at",
       "description": "Move the cumulative-since-reset baseline to a specific timestamp (e.g. to restore a previous anchor). Restores both consumption and production baselines.",
       "fields": {
-        "reset_at": { "name": "Reset at", "description": "New anchor timestamp. The cumulative sensors will sum intervals from this moment forward." },
-        "entry_id": { "name": "Config entry", "description": "Which Estfeed config entry to update." }
+        "reset_at": {
+          "name": "Reset at",
+          "description": "New anchor timestamp. The cumulative sensors will sum intervals from this moment forward."
+        },
+        "entry_id": {
+          "name": "Config entry",
+          "description": "Which Estfeed config entry to update."
+        }
       }
     }
   }

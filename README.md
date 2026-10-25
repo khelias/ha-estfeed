@@ -45,6 +45,30 @@ Set these in the integration options. The defaults are **22% VAT** and 0 for eve
 
 These EUR estimates leave out time-windowed supplier margins, monthly fixed charges and anything else not priced per kWh, and approximate quarter-hour pricing with the hourly mean. They are labelled EUR regardless of Home Assistant's currency setting. Use the dashboard's own price configuration if needed.
 
+### Fixed-price contracts
+
+[#fixed-price-contracts](#fixed-price-contracts)
+
+On a fixed-price (non-exchange) contract, turn **off** "Exchange (spot) price contract" (`use_spot_price`) in the integration options. The spot price is then ignored and the tariff becomes:
+
+```
+(grid transfer + fees) × (1 + VAT%/100) + margin
+```
+
+where **margin** is your fixed energy price per kWh incl. VAT. Grid day/night rates, weekends and public holidays work exactly as above.
+
+### Changing contracts (tariff periods)
+
+When you edit the tariff, set **Tariff valid from** to the date the new contract starts. The tariff in force until then is archived as a period, so every hour before that date keeps the price it was billed at; only hours from that date on use the new tariff, and the cost history rebuild respects the periods. The date may lie in the future to schedule a switch. Leave the date empty only to correct a mistake for the whole history (this clears the archive). The options form lists the archived periods.
+
+### Price now and bill forecast
+
+Electricity meters also get `sensor.<n>_price_now` (EUR/kWh for the current hour under the tariff in force, refreshed hourly) and `sensor.<n>_bill_forecast` (this month's settled cost extrapolated to the whole month; until a full day of the month has settled it uses the previous month's rate).
+
+### Monthly fees
+
+**Monthly fees** (EUR incl. VAT: supplier and grid subscriptions) are spread evenly over the hours of each local month and added to the consumption cost statistic and cost sensors, so a month's cost on the Energy dashboard equals the bill. They are part of the tariff, so they are archived per tariff period and a change follows **Tariff valid from**. Compensation for production never includes them.
+
 ### Hourly price statistic
 
 Electricity entries also publish `estfeed:<name>_price` (unit `EUR/kWh`, mean/min/max per hour): the full tariff price of every hour the integration has spot prices for, including the day-ahead hours Elering has already published, so price history is available from the first install rather than from whenever a price sensor started being recorded. Every hourly tick writes the hours that are new or changed, a restart or backfill writes the whole cached window, and a tariff option change rewrites it. Plot it with the core `statistics-graph` card or any card that reads `recorder/statistics_during_period`.

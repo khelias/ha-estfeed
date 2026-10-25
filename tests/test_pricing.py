@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -15,7 +15,11 @@ from custom_components.estfeed.pricing import (
     compute_cost_rows,
     compute_cost_rows_from_hourly,
     cost_for_window,
+    hours_in_local_month,
+    insert_tariff_period,
     make_tariff,
+    monthly_fee_per_hour,
+    scheduled_tariff,
 )
 
 HOUR = datetime(2026, 5, 21, 10, tzinfo=UTC)  # Thu, a plain weekday hour
@@ -390,3 +394,68 @@ def test_cost_for_window_production_kind_empty_when_no_production():
         make_tariff(0.0, 0.0),
     )
     assert (total, missing) == (0.0, 0)
+
+
+def test_make_tariff_without_spot_uses_margin_as_fixed_price():
+    tariff = make_tariff(24.0, 0.129, fees_eur_per_kwh=0.018, use_spot=False)
+    assert tariff(0.30, HOUR) == pytest.approx(0.018 * 1.24 + 0.129)
+    assert tariff(-0.02, HOUR) == pytest.approx(tariff(0.0, HOUR))
+
+
+def test_scheduled_tariff_uses_period_in_force_on_local_date():
+    fixed = make_tariff(24.0, 0.129, use_spot=False)
+    spot = make_tariff(24.0, 0.005)
+    tariff = scheduled_tariff([(date(2027, 1, 1), fixed)], spot, TALLINN)
+    # 2026-12-31 22:30 UTC is already 2027-01-01 00:30 in Tallinn -> new tariff.
+    assert tariff(0.10, datetime(2026, 12, 31, 21, tzinfo=UTC)) == pytest.approx(
+        0.10 * 1.24 + 0.005
+    )
+    assert tariff(
+        0.10, datetime(2026, 12, 31, 21, tzinfo=UTC) - timedelta(hours=1)
+    ) == pytest.approx(0.129)
+
+
+def test_insert_tariff_period_archives_current_until_effective_date():
+    current = {"margin_eur_per_kwh": 0.129, "use_spot_price": False}
+    history = insert_tariff_period([], current, date(2027, 1, 1))
+    assert history == [{**current, "until": "2027-01-01"}]
+    later = insert_tariff_period(history, {"margin_eur_per_kwh": 0.005}, date(2027, 6, 1))
+    assert [p["until"] for p in later] == ["2027-01-01", "2027-06-01"]
+    assert later[0] == history[0]  # earlier period untouched
+
+
+def test_insert_tariff_period_before_last_change_truncates_and_drops_superseded():
+    history = [
+        {"margin_eur_per_kwh": 0.10, "until": "2026-03-01"},
+        {"margin_eur_per_kwh": 0.12, "until": "2026-09-01"},
+    ]
+    current = {"margin_eur_per_kwh": 0.15}
+    result = insert_tariff_period(history, current, date(2026, 5, 1))
+    # The 0.12 period is cut at 05-01; the 0.15 tariff (from 09-01) is superseded.
+    assert result == [
+        {"margin_eur_per_kwh": 0.10, "until": "2026-03-01"},
+        {"margin_eur_per_kwh": 0.12, "until": "2026-05-01"},
+    ]
+    on_boundary = insert_tariff_period(history, current, date(2026, 3, 1))
+    assert on_boundary == [{"margin_eur_per_kwh": 0.10, "until": "2026-03-01"}]
+
+
+def test_hours_in_local_month_counts_dst_changes():
+    assert hours_in_local_month(datetime(2026, 10, 10, tzinfo=UTC), TALLINN) == 745
+    assert hours_in_local_month(datetime(2026, 3, 10, tzinfo=UTC), TALLINN) == 743
+    assert hours_in_local_month(datetime(2026, 6, 10, tzinfo=UTC), TALLINN) == 720
+
+
+def test_monthly_fee_shares_add_up_to_the_monthly_fee():
+    fee = monthly_fee_per_hour(lambda _h: 12.39, TALLINN)
+    start = datetime(2026, 9, 30, 21, tzinfo=UTC)  # 2026-10-01 00:00 Tallinn
+    total = sum(fee(start + timedelta(hours=h)) for h in range(745))
+    assert total == pytest.approx(12.39)
+
+
+def test_cost_rows_include_hourly_fee():
+    tariff = make_tariff(0.0, 0.0)
+    rows = compute_cost_rows_from_hourly(
+        {HOUR: 2.0}, {HOUR: 0.10}, tariff, prior_sum=1.0, hourly_fee=lambda _h: 0.05
+    )
+    assert rows[0]["sum"] == pytest.approx(1.0 + 2.0 * 0.10 + 0.05)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -14,6 +15,8 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import DateSelector
+from homeassistant.util import dt as dt_util
 
 from .api import EstfeedAuthError, EstfeedClient, EstfeedError
 from .const import (
@@ -25,27 +28,36 @@ from .const import (
     CONF_GRID_DAY_EUR_PER_KWH,
     CONF_GRID_NIGHT_EUR_PER_KWH,
     CONF_MARGIN_EUR_PER_KWH,
+    CONF_MONTHLY_FEES_EUR,
     CONF_NIGHT_END_HOUR,
     CONF_NIGHT_ON_HOLIDAYS,
     CONF_NIGHT_ON_WEEKENDS,
     CONF_NIGHT_START_HOUR,
     CONF_RESOLUTION,
+    CONF_TARIFF_EFFECTIVE_FROM,
+    CONF_TARIFF_HISTORY,
+    CONF_USE_SPOT_PRICE,
     CONF_VAT_PERCENT,
     DEFAULT_BACKFILL_MONTHS,
     DEFAULT_FEES_EUR_PER_KWH,
     DEFAULT_FRIENDLY_NAME,
     DEFAULT_GRID_EUR_PER_KWH,
     DEFAULT_MARGIN_EUR_PER_KWH,
+    DEFAULT_MONTHLY_FEES_EUR,
     DEFAULT_NIGHT_END_HOUR,
     DEFAULT_NIGHT_ON_HOLIDAYS,
     DEFAULT_NIGHT_ON_WEEKENDS,
     DEFAULT_NIGHT_START_HOUR,
+    DEFAULT_USE_SPOT_PRICE,
     DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_BACKFILL_MONTHS,
     MIN_BACKFILL_MONTHS,
+    TARIFF_DEFAULTS,
+    TARIFF_PRICING_KEYS,
     Resolution,
 )
+from .pricing import insert_tariff_period
 from .utils import slugify
 
 _USER_SCHEMA = vol.Schema(
@@ -155,10 +167,12 @@ class EstfeedOptionsFlow(OptionsFlow):
     """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
         current = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(
+                title="", data=_merge_tariff_history(current, user_input)
+            )
+
         schema = vol.Schema(
             {
                 vol.Required(
@@ -169,6 +183,14 @@ class EstfeedOptionsFlow(OptionsFlow):
                     CONF_BACKFILL_MONTHS,
                     default=current.get(CONF_BACKFILL_MONTHS, DEFAULT_BACKFILL_MONTHS),
                 ): vol.All(int, vol.Range(min=MIN_BACKFILL_MONTHS, max=MAX_BACKFILL_MONTHS)),
+                vol.Optional(
+                    CONF_TARIFF_EFFECTIVE_FROM,
+                    description={"suggested_value": dt_util.now().date().isoformat()},
+                ): DateSelector(),
+                vol.Required(
+                    CONF_USE_SPOT_PRICE,
+                    default=current.get(CONF_USE_SPOT_PRICE, DEFAULT_USE_SPOT_PRICE),
+                ): bool,
                 vol.Required(
                     CONF_VAT_PERCENT,
                     default=current.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT),
@@ -205,6 +227,55 @@ class EstfeedOptionsFlow(OptionsFlow):
                     CONF_NIGHT_ON_HOLIDAYS,
                     default=current.get(CONF_NIGHT_ON_HOLIDAYS, DEFAULT_NIGHT_ON_HOLIDAYS),
                 ): bool,
+                vol.Required(
+                    CONF_MONTHLY_FEES_EUR,
+                    default=current.get(CONF_MONTHLY_FEES_EUR, DEFAULT_MONTHLY_FEES_EUR),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1000.0)),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders={"history": _describe_history(current)},
+        )
+
+
+def _tariff_of(options: Mapping[str, Any]) -> dict[str, Any]:
+    """The tariff keys of an options mapping, with defaults filled in."""
+    return {key: options.get(key, TARIFF_DEFAULTS[key]) for key in TARIFF_PRICING_KEYS}
+
+
+def _merge_tariff_history(current: Mapping[str, Any], user_input: dict[str, Any]) -> dict[str, Any]:
+    """Turn a submitted options form into stored options with tariff periods.
+
+    When the tariff changed and an effective date was given, the tariff in force
+    until then is archived so hours before that date keep their price. With no
+    date the new tariff applies to the whole history and the archive is cleared.
+    A submit that leaves the tariff unchanged keeps the archive as it was.
+    """
+    data = dict(user_input)
+    raw_date = data.pop(CONF_TARIFF_EFFECTIVE_FROM, None)
+    history = list(current.get(CONF_TARIFF_HISTORY) or [])
+    if _tariff_of(data) != _tariff_of(current):
+        if raw_date:
+            effective_from = date.fromisoformat(str(raw_date))
+            history = insert_tariff_period(history, _tariff_of(current), effective_from)
+        else:
+            history = []
+    data[CONF_TARIFF_HISTORY] = history
+    return data
+
+
+def _describe_history(options: Mapping[str, Any]) -> str:
+    """One line per archived tariff period, for the options form description."""
+    lines = []
+    start = "…"
+    for period in sorted(options.get(CONF_TARIFF_HISTORY) or [], key=lambda p: str(p["until"])):
+        kind = "spot" if period.get(CONF_USE_SPOT_PRICE, True) else "fixed"
+        lines.append(
+            f"{start} → {period['until']}: {kind}, margin {period.get('margin_eur_per_kwh')}, "
+            f"monthly fees {period.get(CONF_MONTHLY_FEES_EUR, 0)}"
+        )
+        start = str(period["until"])
+    lines.append(f"{start} → now: current")
+    return "\n".join(lines)

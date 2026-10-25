@@ -91,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.attach_nps_client(EleringNpsClient(session))
     coordinator.attach_store(Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.baselines"))
     await coordinator.async_load_baselines()
+    await coordinator.async_load_holidays()
 
     needs_backfill = True
     recorder = get_instance(hass)

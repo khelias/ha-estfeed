@@ -34,6 +34,8 @@
         "data": {
           "resolution": "Andmete täpsus",
           "backfill_months": "Ajalooliste andmete aken (kuud)",
+          "tariff_effective_from": "Tariif kehtib alates (tühjaks jättes kogu ajaloole)",
+          "use_spot_price": "Börsihinnaga pakett — fikseeritud hinnaga paketi puhul lülita välja",
           "vat_percent": "Käibemaks (%)",
           "margin_eur_per_kwh": "Müüja marginaal (EUR/kWh koos KM-iga, võib olla negatiivne)",
           "fees_eur_per_kwh": "Fikseeritud tasud kWh kohta ilma KM-ita (taastuvenergia tasu, aktsiis, ...)",
@@ -42,39 +44,91 @@
           "night_start_hour": "Öötariif algab (tund, kohalik aeg)",
           "night_end_hour": "Öötariif lõpeb (tund, kohalik aeg)",
           "night_on_weekends": "Öötariif kogu nädalavahetusel",
-          "night_on_holidays": "Öötariif riigipühadel"
-        }
+          "night_on_holidays": "Öötariif riigipühadel",
+          "monthly_fees_eur": "Kuutasud koos KM-ga, EUR (müüja + võrgu kuutasu) — jaotatakse kuu tundidele ja lisatakse kulule"
+        },
+        "description": "Tariifiperioodid:\n{history}\n\nTariifi muutes märgi kuupäev, millest see kehtib: varasemad tunnid jäävad vana tariifiga. Jäta kuupäev tühjaks ainult siis, kui parandad tariifi kogu ajaloo jaoks."
       }
     }
   },
   "entity": {
     "sensor": {
-      "consumption_today": { "name": "Tänane tarbimine" },
-      "consumption_yesterday": { "name": "Eilne tarbimine" },
-      "consumption_month_to_date": { "name": "Tarbimine sel kuul" },
-      "consumption_previous_month": { "name": "Eelmise kuu tarbimine" },
-      "production_today": { "name": "Tänane tootmine" },
-      "production_yesterday": { "name": "Eilne tootmine" },
-      "production_month_to_date": { "name": "Tootmine sel kuul" },
-      "production_previous_month": { "name": "Eelmise kuu tootmine" },
-      "consumption_cumulative": { "name": "Kumulatiivne tarbimine" },
-      "production_cumulative": { "name": "Kumulatiivne tootmine" },
-      "cost_today": { "name": "Tänane kulu" },
-      "cost_yesterday": { "name": "Eilne kulu" },
-      "cost_month_to_date": { "name": "Kulu sel kuul" },
-      "cost_previous_month": { "name": "Eelmise kuu kulu" },
-      "compensation_today": { "name": "Tänane hüvitis" },
-      "compensation_yesterday": { "name": "Eilne hüvitis" },
-      "compensation_month_to_date": { "name": "Hüvitis sel kuul" },
-      "compensation_previous_month": { "name": "Eelmise kuu hüvitis" },
-      "latest_interval": { "name": "Viimane intervall" }
+      "consumption_today": {
+        "name": "Tänane tarbimine"
+      },
+      "consumption_yesterday": {
+        "name": "Eilne tarbimine"
+      },
+      "consumption_month_to_date": {
+        "name": "Tarbimine sel kuul"
+      },
+      "consumption_previous_month": {
+        "name": "Eelmise kuu tarbimine"
+      },
+      "production_today": {
+        "name": "Tänane tootmine"
+      },
+      "production_yesterday": {
+        "name": "Eilne tootmine"
+      },
+      "production_month_to_date": {
+        "name": "Tootmine sel kuul"
+      },
+      "production_previous_month": {
+        "name": "Eelmise kuu tootmine"
+      },
+      "consumption_cumulative": {
+        "name": "Kumulatiivne tarbimine"
+      },
+      "production_cumulative": {
+        "name": "Kumulatiivne tootmine"
+      },
+      "cost_today": {
+        "name": "Tänane kulu"
+      },
+      "cost_yesterday": {
+        "name": "Eilne kulu"
+      },
+      "cost_month_to_date": {
+        "name": "Kulu sel kuul"
+      },
+      "cost_previous_month": {
+        "name": "Eelmise kuu kulu"
+      },
+      "compensation_today": {
+        "name": "Tänane hüvitis"
+      },
+      "compensation_yesterday": {
+        "name": "Eilne hüvitis"
+      },
+      "compensation_month_to_date": {
+        "name": "Hüvitis sel kuul"
+      },
+      "compensation_previous_month": {
+        "name": "Eelmise kuu hüvitis"
+      },
+      "latest_interval": {
+        "name": "Viimane intervall"
+      },
+      "price_now": {
+        "name": "Hind praegu"
+      },
+      "bill_forecast": {
+        "name": "Kuu arve prognoos"
+      }
     },
     "binary_sensor": {
-      "data_fresh": { "name": "Andmed värsked" }
+      "data_fresh": {
+        "name": "Andmed värsked"
+      }
     },
     "button": {
-      "consumption_cumulative_reset": { "name": "Lähtesta kumulatiivne tarbimine" },
-      "production_cumulative_reset": { "name": "Lähtesta kumulatiivne tootmine" }
+      "consumption_cumulative_reset": {
+        "name": "Lähtesta kumulatiivne tarbimine"
+      },
+      "production_cumulative_reset": {
+        "name": "Lähtesta kumulatiivne tootmine"
+      }
     }
   },
   "services": {
@@ -82,16 +136,28 @@
       "name": "Lae ajalugu",
       "description": "Lae uuesti ja avalda pikaajaline statistika laiema ajaakna kohta.",
       "fields": {
-        "months": { "name": "Kuud", "description": "Mitme kuu ajalugu uuesti laadida (1-84)." },
-        "entry_id": { "name": "Konfig kirje", "description": "Millise Estfeed kirje ajalugu laadida." }
+        "months": {
+          "name": "Kuud",
+          "description": "Mitme kuu ajalugu uuesti laadida (1-84)."
+        },
+        "entry_id": {
+          "name": "Konfig kirje",
+          "description": "Millise Estfeed kirje ajalugu laadida."
+        }
       }
     },
     "set_cumulative_reset_at": {
       "name": "Määra kumulatiivse lähtestus",
       "description": "Liiguta kumulatiivse arvesti algushetk soovitud ajale (nt taasta varasem ankur). Taastab nii tarbimise kui tootmise baasjooned.",
       "fields": {
-        "reset_at": { "name": "Lähtestus", "description": "Uus algushetk. Kumulatiivsed sensorid summeerivad intervallid alates sellest hetkest." },
-        "entry_id": { "name": "Konfig kirje", "description": "Millise Estfeed kirje algushetk uuendada." }
+        "reset_at": {
+          "name": "Lähtestus",
+          "description": "Uus algushetk. Kumulatiivsed sensorid summeerivad intervallid alates sellest hetkest."
+        },
+        "entry_id": {
+          "name": "Konfig kirje",
+          "description": "Millise Estfeed kirje algushetk uuendada."
+        }
       }
     }
   }
