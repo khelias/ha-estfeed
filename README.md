@@ -1,6 +1,5 @@
 # Estfeed for Home Assistant
 
-[![Validate](https://img.shields.io/github/actions/workflow/status/khelias/ha-estfeed/validate.yml?branch=main&label=validate)](https://github.com/khelias/ha-estfeed/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Imports [Elering Estfeed](https://estfeed.elering.ee/) meter data into Home Assistant's Energy dashboard, with daily, monthly and cumulative sensors. This is a fork of [tehisain/ha-estfeed](https://github.com/tehisain/ha-estfeed) that adds the day/night grid tariff, cost sensors and the hourly price statistic.
