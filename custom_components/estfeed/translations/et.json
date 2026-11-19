@@ -34,8 +34,8 @@
         "data": {
           "resolution": "Andmete täpsus",
           "backfill_months": "Ajalooliste andmete aken (kuud)",
-          "tariff_effective_from": "Tariif kehtib alates (tühjaks jättes kogu ajaloole)",
-          "use_spot_price": "Börsihinnaga pakett — fikseeritud hinnaga paketi puhul lülita välja",
+          "tariff_effective_from": "Tariif kehtib alates (jäta tühjaks, kui see kehtib kogu ajaloole)",
+          "use_spot_price": "Börsihinnaga pakett (fikseeritud hinnaga paketi puhul lülita välja)",
           "vat_percent": "Käibemaks (%)",
           "margin_eur_per_kwh": "Müüja marginaal (EUR/kWh koos KM-iga, võib olla negatiivne)",
           "fees_eur_per_kwh": "Fikseeritud tasud kWh kohta ilma KM-ita (taastuvenergia tasu, aktsiis, ...)",
@@ -45,9 +45,9 @@
           "night_end_hour": "Öötariif lõpeb (tund, kohalik aeg)",
           "night_on_weekends": "Öötariif kogu nädalavahetusel",
           "night_on_holidays": "Öötariif riigipühadel",
-          "monthly_fees_eur": "Kuutasud koos KM-ga, EUR (müüja + võrgu kuutasu) — jaotatakse kuu tundidele ja lisatakse kulule"
+          "monthly_fees_eur": "Kuutasud koos KM-iga, EUR (müüja ja võrgu kuutasu), jaotatakse kuu tundide peale ja lisatakse kulule"
         },
-        "description": "Tariifiperioodid:\n{history}\n\nTariifi muutes märgi kuupäev, millest see kehtib: varasemad tunnid jäävad vana tariifiga. Jäta kuupäev tühjaks ainult siis, kui parandad tariifi kogu ajaloo jaoks."
+        "description": "Tariifiperioodid:\n{history}\n\nTariifi muutes märgi kuupäev, millest see kehtib: varasemate tundide hind jääb vana tariifi järgi. Jäta kuupäev tühjaks ainult siis, kui parandad tariifi kogu ajaloo jaoks."
       }
     }
   },
@@ -110,9 +110,6 @@
       "latest_interval": {
         "name": "Viimane intervall"
       },
-      "price_now": {
-        "name": "Hind praegu"
-      },
       "bill_forecast": {
         "name": "Kuu arve prognoos"
       }
@@ -141,7 +138,7 @@
           "description": "Mitme kuu ajalugu uuesti laadida (1-84)."
         },
         "entry_id": {
-          "name": "Konfig kirje",
+          "name": "Seadistuskirje",
           "description": "Millise Estfeed kirje ajalugu laadida."
         }
       }
@@ -155,7 +152,7 @@
           "description": "Uus algushetk. Kumulatiivsed sensorid summeerivad intervallid alates sellest hetkest."
         },
         "entry_id": {
-          "name": "Konfig kirje",
+          "name": "Seadistuskirje",
           "description": "Millise Estfeed kirje algushetk uuendada."
         }
       }

@@ -12,8 +12,9 @@ from homeassistant.components.recorder.models import StatisticData
 from .api import AccountingInterval, interval_value
 from .const import Kind
 
-# A tariff prices one hour: (spot EUR/kWh, top-of-hour UTC) -> EUR/kWh incl. VAT.
-Tariff = Callable[[float, datetime], float]
+# A tariff prices one hour: (spot EUR/kWh or None, top-of-hour UTC) -> EUR/kWh
+# incl. VAT, or None when it needs the spot and the hour has none.
+Tariff = Callable[[float | None, datetime], float | None]
 # A fixed charge for one hour regardless of energy: top-of-hour UTC -> EUR.
 HourlyFee = Callable[[datetime], float]
 
@@ -33,9 +34,14 @@ def monthly_fee_per_hour(monthly_fee_at: Callable[[datetime], float], tz: tzinfo
     (it may differ between tariff periods). Summed over a whole month the
     shares add up to exactly that month's charge.
     """
+    month_hours: dict[tuple[int, int], float] = {}
 
     def fee(hour_utc: datetime) -> float:
-        return monthly_fee_at(hour_utc) / hours_in_local_month(hour_utc, tz)
+        local = hour_utc.astimezone(tz)
+        key = (local.year, local.month)
+        if key not in month_hours:
+            month_hours[key] = hours_in_local_month(hour_utc, tz)
+        return monthly_fee_at(hour_utc) / month_hours[key]
 
     return fee
 
@@ -116,9 +122,11 @@ def make_tariff(
     """
     grid_tariff = grid if grid is not None else GridTariff()
 
-    def tariff(spot_eur_per_kwh: float, hour_utc: datetime) -> float:
+    def tariff(spot_eur_per_kwh: float | None, hour_utc: datetime) -> float | None:
+        if use_spot and spot_eur_per_kwh is None:
+            return None
         return apply_tariff(
-            spot_eur_per_kwh if use_spot else 0.0,
+            spot_eur_per_kwh if use_spot and spot_eur_per_kwh is not None else 0.0,
             vat_percent,
             margin_eur_per_kwh,
             grid_eur_per_kwh=grid_tariff.rate(hour_utc),
@@ -128,24 +136,39 @@ def make_tariff(
     return tariff
 
 
+def period_at[T](
+    schedule: Sequence[tuple[date, T]], current: T, tz: tzinfo
+) -> Callable[[datetime], T]:
+    """Look up what was in force for an hour by its local date.
+
+    ``schedule`` holds closed periods as ``(until, value)``, sorted by
+    ``until``: a period covers local dates before ``until`` and after the
+    previous period's ``until``. Hours on or after the last ``until`` get
+    ``current``.
+    """
+
+    def lookup(hour_utc: datetime) -> T:
+        local_day = hour_utc.astimezone(tz).date()
+        for until, value in schedule:
+            if local_day < until:
+                return value
+        return current
+
+    return lookup
+
+
 def scheduled_tariff(
     schedule: Sequence[tuple[date, Tariff]], current: Tariff, tz: tzinfo
 ) -> Tariff:
     """Price each hour with the tariff that was in force on its local date.
 
-    ``schedule`` holds closed periods as ``(until, tariff)``: a period covers
-    local dates before ``until`` and after the previous period's ``until``.
-    Hours on or after the last ``until`` use ``current``. This keeps history
-    priced at the contract it was billed under when the tariff later changes.
+    Keeps history priced at the contract it was billed under when the tariff
+    later changes. ``schedule`` is as for ``period_at``.
     """
-    ordered = sorted(schedule, key=lambda item: item[0])
+    lookup = period_at(schedule, current, tz)
 
-    def tariff(spot_eur_per_kwh: float, hour_utc: datetime) -> float:
-        local_day = hour_utc.astimezone(tz).date()
-        for until, period_tariff in ordered:
-            if local_day < until:
-                return period_tariff(spot_eur_per_kwh, hour_utc)
-        return current(spot_eur_per_kwh, hour_utc)
+    def tariff(spot_eur_per_kwh: float | None, hour_utc: datetime) -> float | None:
+        return lookup(hour_utc)(spot_eur_per_kwh, hour_utc)
 
     return tariff
 
@@ -164,19 +187,12 @@ def insert_tariff_period(
     because the new tariff supersedes them. Earlier periods are untouched.
     """
     eff = effective_from.isoformat()
-    kept: list[dict[str, Any]] = []
-    prev_until: str | None = None
-    for period in sorted(history, key=lambda p: str(p["until"])):
-        if prev_until is not None and prev_until >= eff:
-            return kept
-        if str(period["until"]) > eff:
-            kept.append({**period, "until": eff})
-            return kept
-        kept.append(dict(period))
-        prev_until = str(period["until"])
-    if prev_until is None or prev_until < eff:
-        kept.append({**current, "until": eff})
-    return kept
+    ordered = sorted(history, key=lambda p: str(p["until"]))
+    kept = [dict(p) for p in ordered if str(p["until"]) <= eff]
+    if kept and str(kept[-1]["until"]) == eff:
+        return kept
+    in_force = next((p for p in ordered if str(p["until"]) > eff), current)
+    return [*kept, {**in_force, "until": eff}]
 
 
 def cost_for_window(
@@ -208,11 +224,11 @@ def cost_for_window(
             hourly[hour] = hourly.get(hour, 0.0) + float(value)
     total, missing = 0.0, 0
     for hour, kwh in hourly.items():
-        price = prices.get(hour)
-        if price is None:
+        rate = tariff(prices.get(hour), hour)
+        if rate is None:
             missing += 1
             continue
-        total += kwh * tariff(price, hour) + (hourly_fee(hour) if hourly_fee else 0.0)
+        total += kwh * rate + (hourly_fee(hour) if hourly_fee else 0.0)
     return total, missing
 
 
@@ -263,11 +279,11 @@ def compute_cost_rows_from_hourly(
     rows: list[StatisticData] = []
     running = prior_sum
     for start in sorted(hourly_energy):
-        price = prices.get(start)
-        if price is None:
+        rate = tariff(prices.get(start), start)
+        if rate is None:
             continue
         fee = hourly_fee(start) if hourly_fee else 0.0
-        cost = round(hourly_energy[start] * tariff(price, start) + fee, 4)
+        cost = round(hourly_energy[start] * rate + fee, 4)
         running = round(running + cost, 4)
         rows.append({"start": start, "state": running, "sum": running})
     return rows

@@ -45,19 +45,10 @@ from .const import (
     CONF_USE_SPOT_PRICE,
     CONF_VAT_PERCENT,
     DAY_AHEAD_HORIZON_DAYS,
-    DEFAULT_FEES_EUR_PER_KWH,
-    DEFAULT_GRID_EUR_PER_KWH,
-    DEFAULT_MARGIN_EUR_PER_KWH,
-    DEFAULT_MONTHLY_FEES_EUR,
-    DEFAULT_NIGHT_END_HOUR,
-    DEFAULT_NIGHT_ON_HOLIDAYS,
-    DEFAULT_NIGHT_ON_WEEKENDS,
-    DEFAULT_NIGHT_START_HOUR,
-    DEFAULT_USE_SPOT_PRICE,
-    DEFAULT_VAT_PERCENT,
     DOMAIN,
     MAX_DAYS_PER_REQUEST,
     ROLLING_CACHE_DAYS,
+    TARIFF_DEFAULTS,
     UPDATE_INTERVAL,
     Kind,
     Resolution,
@@ -68,8 +59,10 @@ from .pricing import (
     HourlyFee,
     Tariff,
     cost_for_window,
+    hours_in_local_month,
     make_tariff,
     monthly_fee_per_hour,
+    period_at,
     scheduled_tariff,
 )
 from .statistics import (
@@ -173,9 +166,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
 
     async def async_load_holidays(self) -> None:
         """Load the public-holiday calendar off the event loop."""
-        country = self.hass.config.country
-        calendar = await self.hass.async_add_executor_job(self._load_public_holidays, country)
-        self._holidays_cache = (country, calendar)
+        await self.hass.async_add_import_executor_job(self._public_holidays)
 
     def attach_nps_client(self, nps: EleringNpsClient) -> None:
         """Inject the NPS price client. Called from setup_entry (production)
@@ -302,66 +293,48 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
                 _LOGGER.warning("Ignoring malformed tariff period %s: %s", period, err)
         return sorted(periods, key=lambda item: item[0])
 
-    def _options_at(self, hour_utc: datetime) -> Mapping[str, Any]:
-        """Tariff options in force for the hour starting at ``hour_utc``."""
-        local_day = hour_utc.astimezone(dt_util.get_default_time_zone()).date()
-        for until, period in self._tariff_periods():
-            if local_day < until:
-                return period
-        return self.options
-
     @staticmethod
     def _tariff_from(
         opts: Mapping[str, Any], tz: tzinfo, public_holidays: Container[date]
     ) -> Tariff:
         """One tariff function from a mapping of tariff options."""
-        vat = float(opts.get(CONF_VAT_PERCENT, DEFAULT_VAT_PERCENT))
-        margin = float(opts.get(CONF_MARGIN_EUR_PER_KWH, DEFAULT_MARGIN_EUR_PER_KWH))
-        fees = float(opts.get(CONF_FEES_EUR_PER_KWH, DEFAULT_FEES_EUR_PER_KWH))
+        o = {**TARIFF_DEFAULTS, **opts}
         grid = GridTariff(
-            day_eur_per_kwh=float(opts.get(CONF_GRID_DAY_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH)),
-            night_eur_per_kwh=float(
-                opts.get(CONF_GRID_NIGHT_EUR_PER_KWH, DEFAULT_GRID_EUR_PER_KWH)
-            ),
-            night_start_hour=int(opts.get(CONF_NIGHT_START_HOUR, DEFAULT_NIGHT_START_HOUR)),
-            night_end_hour=int(opts.get(CONF_NIGHT_END_HOUR, DEFAULT_NIGHT_END_HOUR)),
-            night_on_weekends=bool(opts.get(CONF_NIGHT_ON_WEEKENDS, DEFAULT_NIGHT_ON_WEEKENDS)),
-            night_on_holidays=bool(opts.get(CONF_NIGHT_ON_HOLIDAYS, DEFAULT_NIGHT_ON_HOLIDAYS)),
+            day_eur_per_kwh=float(o[CONF_GRID_DAY_EUR_PER_KWH]),
+            night_eur_per_kwh=float(o[CONF_GRID_NIGHT_EUR_PER_KWH]),
+            night_start_hour=int(o[CONF_NIGHT_START_HOUR]),
+            night_end_hour=int(o[CONF_NIGHT_END_HOUR]),
+            night_on_weekends=bool(o[CONF_NIGHT_ON_WEEKENDS]),
+            night_on_holidays=bool(o[CONF_NIGHT_ON_HOLIDAYS]),
             tz=tz,
             holidays=public_holidays,
         )
-        use_spot = bool(opts.get(CONF_USE_SPOT_PRICE, DEFAULT_USE_SPOT_PRICE))
-        return make_tariff(vat, margin, fees_eur_per_kwh=fees, grid=grid, use_spot=use_spot)
-
-    def _build_hourly_fee(self) -> HourlyFee | None:
-        """Per-hour share of the monthly fees in force; ``None`` when no period has any."""
-        sources = [self.options, *(period for _until, period in self._tariff_periods())]
-        if not any(float(o.get(CONF_MONTHLY_FEES_EUR) or 0) > 0 for o in sources):
-            return None
-
-        def monthly_fee_at(hour_utc: datetime) -> float:
-            opts = self._options_at(hour_utc)
-            return float(opts.get(CONF_MONTHLY_FEES_EUR, DEFAULT_MONTHLY_FEES_EUR) or 0)
-
-        return monthly_fee_per_hour(monthly_fee_at, dt_util.get_default_time_zone())
+        return make_tariff(
+            float(o[CONF_VAT_PERCENT]),
+            float(o[CONF_MARGIN_EUR_PER_KWH]),
+            fees_eur_per_kwh=float(o[CONF_FEES_EUR_PER_KWH]),
+            grid=grid,
+            use_spot=bool(o[CONF_USE_SPOT_PRICE]),
+        )
 
     def _hourly_fee_for(self, kind: Kind) -> HourlyFee | None:
-        """Monthly fees belong to the consumption bill only, never to compensation."""
-        return self._build_hourly_fee() if kind == Kind.CONSUMPTION else None
+        """Per-hour share of the monthly fees in force; ``None`` when none applies.
 
-    def price_at(self, hour_utc: datetime) -> float | None:
-        """Billed EUR/kWh for the hour starting at ``hour_utc`` (top of hour, UTC).
-
-        ``None`` when that hour's spot price is needed but not cached yet. On a
-        fixed-price contract the spot is irrelevant, so no cached price is needed.
+        Monthly fees belong to the consumption bill only, never to compensation.
         """
-        hour = hour_utc.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
-        spot = self._nps.cached_prices.get(hour) if self._nps is not None else None
-        if spot is None:
-            if bool(self._options_at(hour).get(CONF_USE_SPOT_PRICE, DEFAULT_USE_SPOT_PRICE)):
-                return None
-            spot = 0.0
-        return self._build_tariff()(spot, hour)
+        if kind != Kind.CONSUMPTION:
+            return None
+        periods = self._tariff_periods()
+        if not any(
+            float(o.get(CONF_MONTHLY_FEES_EUR) or 0) > 0
+            for o in (self.options, *(period for _until, period in periods))
+        ):
+            return None
+        tz = dt_util.get_default_time_zone()
+        options_at = period_at(periods, self.options, tz)
+        return monthly_fee_per_hour(
+            lambda hour: float(options_at(hour).get(CONF_MONTHLY_FEES_EUR) or 0), tz
+        )
 
     def bill_forecast(self, eic: str, now_utc: datetime) -> dict[str, Any] | None:
         """Projected bill for the current local month, EUR incl. VAT.
@@ -375,11 +348,11 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
         tz = dt_util.get_default_time_zone()
         local = now_utc.astimezone(tz)
         month_start = datetime(local.year, local.month, 1, tzinfo=tz)
-        next_month = (month_start + timedelta(days=32)).replace(day=1)
         prev_month = (month_start - timedelta(days=1)).replace(day=1)
-        ms_utc, nm_utc, pm_utc = (d.astimezone(UTC) for d in (month_start, next_month, prev_month))
-        month_hours = (nm_utc - ms_utc).total_seconds() / 3600
-        fees = float(self.options.get(CONF_MONTHLY_FEES_EUR, DEFAULT_MONTHLY_FEES_EUR))
+        ms_utc, pm_utc = month_start.astimezone(UTC), prev_month.astimezone(UTC)
+        month_hours = hours_in_local_month(now_utc, tz)
+        in_force = period_at(self._tariff_periods(), self.options, tz)(now_utc)
+        fees = float(in_force.get(CONF_MONTHLY_FEES_EUR) or 0)
 
         bucket: Iterable[AccountingInterval] = self.cache.get((eic, Kind.CONSUMPTION)) or ()
         latest = max((i.period_start for i in bucket if i.period_start >= ms_utc), default=None)
@@ -394,7 +367,7 @@ class EstfeedCoordinator(DataUpdateCoordinator[None]):
             basis, basis_hours = "month_to_date", elapsed_hours
         else:
             result = self.cost_for_window(eic, Kind.CONSUMPTION, pm_utc, ms_utc)
-            basis, basis_hours = "previous_month", (ms_utc - pm_utc).total_seconds() / 3600
+            basis, basis_hours = "previous_month", hours_in_local_month(pm_utc, tz)
         if result is None or basis_hours <= 0:
             return None
         cost, hours_without_price = result

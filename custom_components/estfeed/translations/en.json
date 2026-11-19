@@ -35,7 +35,7 @@
           "resolution": "Data resolution",
           "backfill_months": "Backfill window (months)",
           "tariff_effective_from": "Tariff valid from (leave empty to apply to all history)",
-          "use_spot_price": "Exchange (spot) price contract — off for a fixed-price contract",
+          "use_spot_price": "Exchange (spot) price contract; turn off for a fixed-price contract",
           "vat_percent": "VAT percentage (%)",
           "margin_eur_per_kwh": "Supplier margin (EUR/kWh incl. VAT, can be negative); with a fixed-price contract: the fixed energy price incl. VAT",
           "fees_eur_per_kwh": "Fixed per-kWh fees excl. VAT (renewable levy, excise, ...)",
@@ -45,7 +45,7 @@
           "night_end_hour": "Night rate ends at (hour, local time)",
           "night_on_weekends": "Night rate all weekend",
           "night_on_holidays": "Night rate on public holidays",
-          "monthly_fees_eur": "Monthly fees incl. VAT, EUR (supplier + grid subscription) — spread over the hours of the month and included in the cost"
+          "monthly_fees_eur": "Monthly fees incl. VAT, EUR (supplier and grid subscription), spread over the hours of the month and added to the cost"
         },
         "description": "Tariff periods:\n{history}\n\nWhen you change the tariff, set the date it starts to apply: hours before that date keep the old tariff. Leave the date empty only to correct the tariff for the whole history."
       }
@@ -109,9 +109,6 @@
       },
       "latest_interval": {
         "name": "Latest interval"
-      },
-      "price_now": {
-        "name": "Price now"
       },
       "bill_forecast": {
         "name": "Bill forecast this month"

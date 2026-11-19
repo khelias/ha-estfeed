@@ -271,10 +271,11 @@ def _describe_history(options: Mapping[str, Any]) -> str:
     lines = []
     start = "…"
     for period in sorted(options.get(CONF_TARIFF_HISTORY) or [], key=lambda p: str(p["until"])):
-        kind = "spot" if period.get(CONF_USE_SPOT_PRICE, True) else "fixed"
+        tariff = {**TARIFF_DEFAULTS, **period}
+        kind = "spot" if tariff[CONF_USE_SPOT_PRICE] else "fixed"
         lines.append(
-            f"{start} → {period['until']}: {kind}, margin {period.get('margin_eur_per_kwh')}, "
-            f"monthly fees {period.get(CONF_MONTHLY_FEES_EUR, 0)}"
+            f"{start} → {period['until']}: {kind}, margin {tariff[CONF_MARGIN_EUR_PER_KWH]}, "
+            f"monthly fees {tariff[CONF_MONTHLY_FEES_EUR]}"
         )
         start = str(period["until"])
     lines.append(f"{start} → now: current")

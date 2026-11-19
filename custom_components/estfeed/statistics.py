@@ -244,7 +244,10 @@ def compute_price_rows(prices: Mapping[datetime, float], tariff: Tariff) -> list
     """
     rows: list[StatisticData] = []
     for hour in sorted(prices):
-        price = round(tariff(prices[hour], hour), 5)
+        rate = tariff(prices[hour], hour)
+        if rate is None:
+            continue
+        price = round(rate, 5)
         rows.append({"start": hour, "mean": price, "min": price, "max": price})
     return rows
 

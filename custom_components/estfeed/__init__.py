@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.recorder.statistics import get_last_statistics
@@ -26,9 +28,11 @@ from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_FRIENDLY_NAME,
+    CONF_TARIFF_HISTORY,
     DOMAIN,
     MAX_BACKFILL_MONTHS,
     MIN_BACKFILL_MONTHS,
+    TARIFF_DEFAULTS,
     TARIFF_OPTION_KEYS,
     CommodityType,
 )
@@ -159,10 +163,21 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     new_options = {**entry.data, **entry.options}
     coordinator.options = new_options
 
-    if any(old_options.get(key) != new_options.get(key) for key in TARIFF_OPTION_KEYS):
+    if _tariff_state(old_options) != _tariff_state(new_options):
         hass.async_create_background_task(
             coordinator.async_rebuild_cost(), name=f"{DOMAIN}_cost_rebuild"
         )
+
+
+def _tariff_state(options: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The tariff options with defaults filled in.
+
+    A key an older version never stored equals its default, so the first save
+    after an upgrade does not start a cost rebuild.
+    """
+    merged = {**TARIFF_DEFAULTS, **options}
+    merged[CONF_TARIFF_HISTORY] = merged.get(CONF_TARIFF_HISTORY) or []
+    return tuple(merged[key] for key in TARIFF_OPTION_KEYS)
 
 
 def _service_targets(hass: HomeAssistant, entry_id: str | None) -> list[EstfeedCoordinator]:

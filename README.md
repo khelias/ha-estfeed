@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Imports [Elering Estfeed](https://estfeed.elering.ee/) meter data into Home Assistant's Energy dashboard, with daily, monthly and cumulative sensors. This is a fork of [tehisain/ha-estfeed](https://github.com/tehisain/ha-estfeed) that adds the day/night grid tariff, cost sensors and the hourly price statistic.
+Imports [Elering Estfeed](https://estfeed.elering.ee/) meter data into Home Assistant's Energy dashboard, with daily, monthly and cumulative sensors. This is a fork of [tehisain/ha-estfeed](https://github.com/tehisain/ha-estfeed) that adds the day/night grid tariff, cost sensors, the hourly price statistic, fixed-price contracts, tariff periods, monthly fees and a bill forecast.
 
 Polls hourly. Meter readings can arrive late; this is not a real-time power monitor.
 
@@ -60,9 +60,9 @@ where **margin** is your fixed energy price per kWh incl. VAT. Grid day/night ra
 
 When you edit the tariff, set **Tariff valid from** to the date the new contract starts. The tariff in force until then is archived as a period, so every hour before that date keeps the price it was billed at; only hours from that date on use the new tariff, and the cost history rebuild respects the periods. The date may lie in the future to schedule a switch. Leave the date empty only to correct a mistake for the whole history (this clears the archive). The options form lists the archived periods.
 
-### Price now and bill forecast
+### Bill forecast
 
-Electricity meters also get `sensor.<n>_price_now` (EUR/kWh for the current hour under the tariff in force, refreshed hourly) and `sensor.<n>_bill_forecast` (this month's settled cost extrapolated to the whole month; until a full day of the month has settled it uses the previous month's rate).
+Electricity meters also get `sensor.<n>_bill_forecast`: this month's settled cost extrapolated to the whole month. Until a full day of the month has settled, it uses the previous month's rate.
 
 ### Monthly fees
 

@@ -1919,28 +1919,29 @@ def test_malformed_tariff_period_is_ignored(hass):
     assert coord._tariff_periods() == []
 
 
-async def test_price_at_fixed_contract_needs_no_spot_price(hass):
+async def test_cost_for_window_prices_fixed_hours_without_spot(hass):
     await hass.config.async_set_time_zone("Europe/Tallinn")
     hass.config.country = "EE"
     coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options=_FIXED_TARIFF)
-    coord.attach_nps_client(EleringNpsClient(MagicMock()))
-    # Fri 2026-10-16 09:20 UTC = 12:20 Tallinn, a workday -> day rate.
-    assert coord.price_at(datetime(2026, 10, 16, 9, 20, tzinfo=UTC)) == pytest.approx(_FIXED_DAY)
-    # Sat -> night rate.
-    assert coord.price_at(datetime(2026, 10, 17, 9, tzinfo=UTC)) == pytest.approx(_FIXED_NIGHT)
-
-
-async def test_price_at_spot_contract_uses_cached_spot_or_none(hass):
-    await hass.config.async_set_time_zone("Europe/Tallinn")
-    coord = EstfeedCoordinator(
-        hass=hass, client=MagicMock(), slug="home", options={CONF_VAT_PERCENT: 24.0}
-    )
-    nps = EleringNpsClient(MagicMock())
+    eic = "38ZEE-00720089-N"
+    # Fri 2026-10-16 09:00 UTC = 12:00 Tallinn, a workday -> day rate.
     hour = datetime(2026, 10, 16, 9, tzinfo=UTC)
-    nps._cache[hour] = 0.10
-    coord.attach_nps_client(nps)
-    assert coord.price_at(hour.replace(minute=40)) == pytest.approx(0.124)
-    assert coord.price_at(hour + timedelta(hours=1)) is None
+    coord.cache[(eic, Kind.CONSUMPTION)].append(
+        AccountingInterval(
+            period_start=hour,
+            consumption_kwh=2.0,
+            production_kwh=None,
+            consumption_m3=None,
+            production_m3=None,
+        )
+    )
+    coord.attach_nps_client(EleringNpsClient(MagicMock()))  # no cached spot prices
+
+    result = coord.cost_for_window(eic, Kind.CONSUMPTION, hour, hour + timedelta(hours=1))
+    assert result is not None
+    cost, missing = result
+    assert cost == pytest.approx(2.0 * _FIXED_DAY)
+    assert missing == 0
 
 
 async def test_bill_forecast_extrapolates_month_including_fees(hass):
@@ -1998,7 +1999,7 @@ async def test_monthly_fee_is_added_to_consumption_cost_only(hass):
 
 def test_no_hourly_fee_when_no_period_has_monthly_fees(hass):
     coord = EstfeedCoordinator(hass=hass, client=MagicMock(), slug="home", options={})
-    assert coord._build_hourly_fee() is None
+    assert coord._hourly_fee_for(Kind.CONSUMPTION) is None
 
 
 async def test_monthly_fee_follows_tariff_periods(hass):
@@ -2012,7 +2013,7 @@ async def test_monthly_fee_follows_tariff_periods(hass):
             CONF_TARIFF_HISTORY: [{CONF_MONTHLY_FEES_EUR: 7.2, "until": "2026-07-01"}],
         },
     )
-    fee = coord._build_hourly_fee()
+    fee = coord._hourly_fee_for(Kind.CONSUMPTION)
     assert fee(datetime(2026, 6, 15, 9, tzinfo=UTC)) == pytest.approx(7.2 / 720)
     assert fee(datetime(2026, 7, 15, 9, tzinfo=UTC)) == pytest.approx(14.4 / 744)
 
@@ -2030,3 +2031,17 @@ async def test_bill_forecast_uses_previous_month_until_a_day_has_settled(hass):
     result = coord.bill_forecast(eic, datetime(2026, 10, 1, 4, tzinfo=UTC))
     assert result is not None
     assert result["basis"] == "previous_month"
+
+
+def test_tariff_state_treats_missing_new_keys_as_defaults():
+    from custom_components.estfeed import _tariff_state
+
+    before_upgrade = {CONF_VAT_PERCENT: 24.0}
+    first_save = {
+        CONF_VAT_PERCENT: 24.0,
+        CONF_USE_SPOT_PRICE: True,
+        CONF_MONTHLY_FEES_EUR: 0.0,
+        CONF_TARIFF_HISTORY: [],
+    }
+    assert _tariff_state(before_upgrade) == _tariff_state(first_save)
+    assert _tariff_state(before_upgrade) != _tariff_state({**first_save, CONF_VAT_PERCENT: 22.0})
