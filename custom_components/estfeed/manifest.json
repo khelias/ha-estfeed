@@ -1,13 +1,13 @@
 {
   "domain": "estfeed",
   "name": "Estfeed",
-  "codeowners": ["@tehisain"],
+  "codeowners": ["@khelias"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "documentation": "https://github.com/tehisain/ha-estfeed",
+  "documentation": "https://github.com/khelias/ha-estfeed",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/tehisain/ha-estfeed/issues",
+  "issue_tracker": "https://github.com/khelias/ha-estfeed/issues",
   "requirements": ["holidays>=0.50"],
   "version": "0.6.0"
 }
