@@ -46,8 +46,6 @@ These EUR estimates leave out time-windowed supplier margins, monthly fixed char
 
 ### Fixed-price contracts
 
-[#fixed-price-contracts](#fixed-price-contracts)
-
 On a fixed-price (non-exchange) contract, turn **off** "Exchange (spot) price contract" (`use_spot_price`) in the integration options. The spot price is then ignored and the tariff becomes:
 
 ```
