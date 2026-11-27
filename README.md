@@ -40,9 +40,9 @@ EUR/kWh = (spot + grid transfer + fees) × (1 + VAT / 100) + margin
 - **Fees** are the fixed per-kWh items quoted excl. VAT (renewable energy levy, security of supply, excise, balancing).
 - **Margin** is the supplier's per-kWh margin, quoted incl. VAT, so it lands after the VAT multiplication. Can be negative.
 
-Set these in the integration options. The defaults are **22% VAT** and 0 for everything else, which reduces to `spot × (1 + VAT / 100) + margin`; Estonia's [standard VAT rate is 24% from 1 July 2025](https://www.emta.ee/en/admin/content/handbook_article/39). Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Check these settings against your contract. One tariff applies to consumption, production and all imported history. Changing any tariff option rebuilds the configured window's costs.
+Set these in the integration options. The defaults are **22% VAT** and 0 for everything else, which reduces to `spot × (1 + VAT / 100) + margin`; Estonia's [standard VAT rate is 24% from 1 July 2025](https://www.emta.ee/en/admin/content/handbook_article/39). Example for an Elektrilevi "Võrk 4" contract with Alexela (2026): grid day 0.0369, night 0.021, fees 0.0219, VAT 24, margin 0.0047. Check these settings against your contract. Consumption and production use the same tariff; which tariff prices an hour follows the tariff periods below. Changing any tariff option rebuilds the configured window's costs.
 
-These EUR estimates leave out time-windowed supplier margins, monthly fixed charges and anything else not priced per kWh, and approximate quarter-hour pricing with the hourly mean. They are labelled EUR regardless of Home Assistant's currency setting. Use the dashboard's own price configuration if needed.
+These EUR estimates leave out time-windowed supplier margins and any other charge that is neither per kWh nor a monthly fee, and approximate quarter-hour pricing with the hourly mean. They are labelled EUR regardless of Home Assistant's currency setting. Use the dashboard's own price configuration if needed.
 
 ### Fixed-price contracts
 
